@@ -66,7 +66,11 @@
     <string name="reported_features_notice">Reported features do not confirm app placement or window mode. Android and the device software manage other apps.</string>
     <string name="display_details">#%1$d · %2$s · %3$d × %4$d px</string>
     <string name="test_display">Try opening OpenDex on display #%1$d</string>
-    <string name="dex_tip">If your device has a desktop mode, start it and open OpenDex from the external display’s app drawer. A mirrored display is not a separate workspace.</string>
+    <string name="dex_tip">If the external display has its own desktop, you can also open OpenDex from its system app launcher.</string>
+    <string name="external_displays">External displays</string>
+    <string name="no_external_display">Android hasn’t reported a separate display. If the system is only mirroring, OpenDex uses the same window as on the main display.</string>
+    <string name="display_current">OpenDex is running on this display.</string>
+    <string name="display_direct_launch_unavailable">OpenDex can’t request a launch directly on this display.</string>
     <plurals name="result_count">
         <item quantity="one">%1$d result</item>
         <item quantity="other">%1$d results</item>
