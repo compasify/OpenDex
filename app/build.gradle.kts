@@ -11,10 +11,13 @@ android {
         applicationId = "dev.opendex"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        resourceConfigurations += listOf("en", "vi")
+    }
+    androidResources {
+        localeFilters += setOf("en", "vi")
+        generateLocaleConfig = true
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -39,4 +42,6 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    debugImplementation("dev.rikka.shizuku:api:13.1.5")
+    debugImplementation("dev.rikka.shizuku:provider:13.1.5")
 }

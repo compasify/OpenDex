@@ -1,6 +1,8 @@
 # Kiểm thử tương thích thiết bị OpenDex
 
-**Trạng thái:** Chưa thử APK trên thiết bị thật. Ma trận dưới đây là hướng dẫn kiểm thử thủ công, không phải danh sách tính năng hay thiết bị đã được xác nhận hỗ trợ.
+**Trạng thái:** Đã xác nhận một trường hợp mở cửa sổ nổi qua ADB trên POCO Pad M1 (xem bên dưới). Các trường hợp còn lại trong ma trận chưa được xác nhận.
+
+The automated UI test attempt on the connected POCO Pad M1 (Android 16) stopped before running any tests: the device rejected the debug APK install (`INSTALL_FAILED_USER_RESTRICTED`). The normal APK installation and all physical-display cases still need verification.
 
 ## Phạm vi và chuẩn bị
 
@@ -34,7 +36,7 @@ Ghi **quan sát thực tế + trạng thái** vào hai cột cuối. `PASS`: đ�
 ## Khi ứng dụng ngoài không mở như mong đợi
 
 1. **POCO:** nếu OpenDex không mở được app, dùng danh sách ứng dụng của launcher hệ thống. Nếu muốn thử cửa sổ nổi, dùng tùy chọn thủ công của HyperOS nếu có. App mở toàn màn hình theo ROM không phải lỗi nếu đã mở đúng app.
-2. **S25:** thử mở app từ danh sách ứng dụng ngay trên màn hình DeX. Chỉ chọn mở trên màn hình hiện tại nếu đó là màn hình bạn muốn và OpenDex có tùy chọn này. Nếu app cũng không mở được khi dùng DeX trực tiếp, ghi riêng giới hạn đó; nếu DeX mở được nhưng OpenDex không, ghi lỗi ở luồng mở từ OpenDex.
+2. **S25:** thử mở app từ danh sách ứng dụng ngay trên màn hình DeX. Chỉ chọn **Mở trên màn hình chính** nếu bạn thực sự muốn mở app trên điện thoại. Nếu app cũng không mở được khi dùng DeX trực tiếp, ghi riêng giới hạn đó; nếu DeX mở được nhưng OpenDex không, ghi lỗi ở luồng mở từ OpenDex.
 3. Ghi kết quả cho từng app, kể cả khi một app chạy còn app kia không. Đừng dùng thông báo “đã gửi yêu cầu mở” hoặc việc màn hình được nhận diện thay cho quan sát trực tiếp.
 
 ## Năm chu kỳ rút/cắm trên S25 Ultra
@@ -67,3 +69,11 @@ Run the existing input and window tests on the built-in display and repeat them 
 | DISPLAY-02 | Resize a native OpenDex window. Where the OS permits, move that same window between displays of different densities. | System caption and controls remain usable; notes and open tool windows survive, with internal bounds fitted to the new workspace. Verify dock, hover, right-click, scroll, Tab/arrows/Enter/Esc and touch equivalents where available. | Untested |
 | DISPLAY-03 | Stop wireless desktop/cast while using the workspace. Repeat five times. On reconnect, observe where Android restores or reopens the workspace. | No crash, unexpected launch, or loss of pins and notes. If Android migrates the existing window, its open tools follow it. | Untested |
 | DISPLAY-04 | Try system screen mirroring (e.g. Miracast or Google Cast) and, separately, a media-only Cast session. | Mirroring shows and uses the source workspace; media-only Cast does not run an OpenDex window. Do not report either as extended desktop support. | Untested |
+
+## ADB floating launch (debug only)
+
+| Target | Procedure | Evidence / status |
+| --- | --- | --- |
+| POCO Pad M1, Android 16 / HyperOS 3.0, built-in display | OpenDex 0.1.1 debug; start Shizuku 13.6.0 via USB ADB, authorize OpenDex in the Shizuku prompt, then long-press Calculator in the OpenDex drawer and select the ADB floating action. | **PASS for Calculator:** `dumpsys activity activities` changed the Calculator task from `mode=fullscreen` before the action to `visible=true mode=freeform` after it. No system windowing setting or default launcher was changed. Other apps and hardware input were not verified in this test. |
+| Built-in display, Shizuku stopped or denied | Try the app drawer, standard launch, and internal windows. | The ADB action should be absent; standard actions do not depend on Shizuku. Retest if permission handling changes. |
+| Wired / wireless external display | Use Android or the OEM desktop launcher to open apps. | The optional ADB action intentionally targets the main display only; external-display support remains subject to the matrix above. |

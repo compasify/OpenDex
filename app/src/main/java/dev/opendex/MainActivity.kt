@@ -3,29 +3,42 @@ package dev.opendex
 import android.app.Application
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.view.ViewTreeObserver
 import android.view.KeyEvent
+import android.view.Surface
+import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import dev.opendex.data.WallpaperStorage
 import dev.opendex.data.WorkspacePreferences
 import dev.opendex.data.WorkspaceStore
+import dev.opendex.desktop.AppWindowState
+import dev.opendex.desktop.Area
 import dev.opendex.desktop.Desktop
 import dev.opendex.desktop.DesktopWindow
+import dev.opendex.desktop.WindowKey
+import dev.opendex.platform.AdbWindows
 import dev.opendex.platform.AndroidDesktop
 import dev.opendex.platform.DesktopCapabilities
 import dev.opendex.platform.InstalledApp
+import dev.opendex.platform.NotificationCenterStore
+import dev.opendex.platform.SystemTrayController
 import dev.opendex.platform.installedApps
 import dev.opendex.ui.OpenDexTheme
 import java.io.IOException
@@ -33,7 +46,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -41,9 +56,14 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private lateinit var desktop: AndroidDesktop
     private lateinit var model: WorkspaceModel
+    private lateinit var systemTray: SystemTrayController
     private var capabilities by mutableStateOf(DesktopCapabilities())
-    private var searchRequests by mutableStateOf(0)
+    private var notificationAccessGranted by mutableStateOf(false)
+    private var searchRequests by mutableIntStateOf(0)
     private val homeRequest = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { refresh() }
+    private val wallpaperPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) model.importCustomWallpaper(uri)
+    }
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = refresh()
         override fun onDisplayRemoved(displayId: Int) = refresh()
@@ -56,17 +76,47 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
+        hideSystemBars()
         desktop = AndroidDesktop(this)
         model = ViewModelProvider(this)[WorkspaceModel::class.java]
+        systemTray = SystemTrayController(this)
         refresh()
         setContent {
             val preferences by model.preferences.collectAsStateWithLifecycle()
             val apps by model.apps.collectAsStateWithLifecycle()
+            val appsLoaded by model.appsLoaded.collectAsStateWithLifecycle()
             val error by model.saveError.collectAsStateWithLifecycle()
             val readError by model.readError.collectAsStateWithLifecycle()
             val noteDraft by model.noteDraft.collectAsStateWithLifecycle()
+            val adbAccess by model.adbWindows.access.collectAsStateWithLifecycle()
+            val windowOrder by model.windowOrder.collectAsStateWithLifecycle()
+            val systemStatus by systemTray.status.collectAsStateWithLifecycle()
+            val notifications by NotificationCenterStore.notifications.collectAsStateWithLifecycle()
             OpenDexTheme(preferences?.theme) {
-                Desktop(preferences, apps, capabilities, desktop, model, error, readError, noteDraft, searchRequests) {
+                Desktop(
+                    preferences = preferences,
+                    apps = apps,
+                    appsLoaded = appsLoaded,
+                    caps = capabilities,
+                    platform = desktop,
+                    model = model,
+                    saveError = error,
+                    readError = readError,
+                    noteDraft = noteDraft,
+                    searchRequests = searchRequests,
+                    adbWindows = model.adbWindows,
+                    adbAccess = adbAccess,
+                    windowOrder = windowOrder,
+                    systemStatus = systemStatus,
+                    systemTray = systemTray,
+                    notifications = notifications,
+                    notificationAccessGranted = notificationAccessGranted,
+                    onPickWallpaper = {
+                        runCatching { wallpaperPicker.launch(arrayOf("image/*")) }.isSuccess
+                    },
+                    onBrightnessChange = { fraction -> systemTray.setBrightness(fraction, window) },
+                    onMoveToBackground = { moveTaskToBack(true) },
+                ) {
                     runCatching { homeRequest.launch(desktop.homeIntent()) }.isSuccess
                 }
             }
@@ -75,6 +125,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        systemTray.start()
         desktop.displayManager.registerDisplayListener(displayListener, null)
         window.decorView.viewTreeObserver.addOnGlobalLayoutListener(windowLayoutListener)
         refresh()
@@ -82,6 +133,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        hideSystemBars()
+        model.adbWindows.refresh()
+        systemTray.refresh()
+        notificationAccessGranted = NotificationCenterStore.isAccessGranted(this)
         refresh()
         model.refreshApps()
     }
@@ -91,15 +146,16 @@ class MainActivity : ComponentActivity() {
         refresh()
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_K && event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed && !event.isShiftPressed) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) searchRequests++
+    override fun onKeyShortcut(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_K && event.hasModifiers(KeyEvent.META_CTRL_ON)) {
+            searchRequests++
             return true
         }
-        return super.dispatchKeyEvent(event)
+        return super.onKeyShortcut(keyCode, event)
     }
 
     override fun onStop() {
+        systemTray.stop()
         window.decorView.viewTreeObserver.removeOnGlobalLayoutListener(windowLayoutListener)
         desktop.displayManager.unregisterDisplayListener(displayListener)
         super.onStop()
@@ -107,20 +163,37 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) refresh()
+        if (hasFocus) {
+            hideSystemBars()
+            systemTray.refresh()
+            notificationAccessGranted = NotificationCenterStore.isAccessGranted(this)
+            refresh()
+        }
+    }
+
+    private fun hideSystemBars() {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.systemBars())
     }
 
     private fun refresh() { if (::desktop.isInitialized) capabilities = desktop.inspect() }
 }
 
 class WorkspaceModel(application: Application) : AndroidViewModel(application) {
-    private val storage = WorkspaceStore(application)
+    private val runtime = WorkspaceRuntime.get(application)
+    private val storage = runtime.storage
+    val adbWindows: AdbWindows = runtime.adbWindows
+    val windowOrder: StateFlow<List<WindowKey>> = runtime.windowOrder
+
     private val readFailure = MutableStateFlow(false)
     val readError = readFailure.asStateFlow()
     val preferences = storage.preferences { readFailure.value = it }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null as WorkspacePreferences?)
     private val installed = MutableStateFlow<List<InstalledApp>>(emptyList())
     val apps = installed.asStateFlow()
+    private val loaded = MutableStateFlow(false)
+    val appsLoaded = loaded.asStateFlow()
     private val error = MutableStateFlow(false)
     val saveError = error.asStateFlow()
     private var refreshJob: Job? = null
@@ -130,6 +203,62 @@ class WorkspaceModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissSaveError() { error.value = false }
 
+    fun appWindows(external: Boolean): StateFlow<List<AppWindowState>> = runtime.appWindows(external)
+
+    fun hydrateAppWindows(external: Boolean, serialized: String, restoreEnabled: Boolean) =
+        runtime.hydrateIfNeeded(external, serialized, restoreEnabled)
+
+    fun pruneMissingApps(external: Boolean, installedIds: Set<String>) =
+        runtime.pruneMissingApps(external, installedIds)
+
+    fun bringToFront(key: WindowKey) = runtime.bringToFront(key)
+
+    fun openAppWindow(external: Boolean, appId: String, area: Area) =
+        runtime.openAppWindow(external, appId, area)
+
+    fun activateAppWindow(external: Boolean, appId: String) =
+        runtime.activateAppWindow(external, appId)
+
+    fun updateAppWindow(external: Boolean, appId: String, transform: (AppWindowState) -> AppWindowState) =
+        runtime.updateAppWindow(external, appId, persist = true, transform = transform)
+
+    fun minimizeAllAppWindows(external: Boolean) = runtime.minimizeAllAppWindows(external)
+
+    fun closeAppWindow(external: Boolean, appId: String) = runtime.closeAppWindow(external, appId)
+
+    fun closeAllAppWindows(external: Boolean, persist: Boolean = true): Boolean =
+        runtime.closeAllAppWindows(external, persist)
+
+    fun attachAppSurface(
+        external: Boolean,
+        app: InstalledApp,
+        surface: Surface,
+        width: Int,
+        height: Int,
+        densityDpi: Int,
+        onFailure: (InstalledApp) -> Unit,
+    ): Long = runtime.attachAppSurface(external, app, surface, width, height, densityDpi, onFailure)
+
+    fun resizeAppSurface(external: Boolean, appId: String, width: Int, height: Int, densityDpi: Int) =
+        runtime.resizeAppSurface(external, appId, width, height, densityDpi)
+
+    fun rescaleOpenDisplays(external: Boolean, densityDpi: Int) =
+        runtime.rescaleOpenDisplays(external, densityDpi)
+
+    fun detachAppSurface(external: Boolean, appId: String, generation: Long) =
+        runtime.detachAppSurface(external, appId, generation)
+
+    fun importCustomWallpaper(uri: Uri) {
+        viewModelScope.launch {
+            val path = WallpaperStorage.importWallpaper(getApplication(), uri)
+            if (path != null) {
+                save { customWallpaper(path) }
+            } else {
+                error.value = true
+            }
+        }
+    }
+
     fun editNote(value: String) {
         draft.value = value
         val revision = ++noteRevision
@@ -137,7 +266,7 @@ class WorkspaceModel(application: Application) : AndroidViewModel(application) {
             note(value)
             // Keep the local text until the persisted change reaches the UI collector.
             if (revision == noteRevision) viewModelScope.launch {
-                kotlinx.coroutines.flow.first(preferences) { it?.note == value }
+                preferences.first { it?.note == value }
                 if (revision == noteRevision) draft.value = null
             }
         }
@@ -151,6 +280,7 @@ class WorkspaceModel(application: Application) : AndroidViewModel(application) {
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
             installed.value = withContext(Dispatchers.IO) { getApplication<Application>().installedApps() }
+            loaded.value = true
         }
     }
 

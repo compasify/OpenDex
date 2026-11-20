@@ -14,6 +14,8 @@ import android.hardware.display.DisplayManager
 import android.os.Build
 import android.provider.Settings
 import android.view.Display
+import android.view.WindowInsets
+import androidx.compose.ui.unit.IntRect
 import dev.opendex.MainActivity
 import java.text.Collator
 import java.util.Locale
@@ -60,6 +62,18 @@ class AndroidDesktop(private val activity: Activity) {
     fun currentDisplayId(): Int =
         (if (Build.VERSION.SDK_INT >= 30) activity.display else activity.windowManager.defaultDisplay)
             ?.displayId ?: Display.DEFAULT_DISPLAY
+
+    fun boundsAboveDock(dockHeightPx: Int): IntRect? {
+        if (Build.VERSION.SDK_INT < 30 || dockHeightPx <= 0 || activity.isInMultiWindowMode) return null
+        val metrics = activity.windowManager.currentWindowMetrics
+        if (metrics.bounds != activity.windowManager.maximumWindowMetrics.bounds) return null
+        // System bars are hidden in immersive mode; respect only visible system bars and the display cutout.
+        val insets = metrics.windowInsets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+        val frame = metrics.bounds
+        val result = IntRect(frame.left + insets.left, frame.top + insets.top,
+            frame.right - insets.right, frame.bottom - insets.bottom - dockHeightPx)
+        return result.takeIf { it.width > 0 && it.height > 0 }
+    }
 
     private val supportsDisplayTargeting =
         activity.packageManager.hasSystemFeature(PackageManager.FEATURE_ACTIVITIES_ON_SECONDARY_DISPLAYS)

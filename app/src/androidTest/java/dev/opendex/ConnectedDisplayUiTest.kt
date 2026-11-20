@@ -27,7 +27,7 @@ class ConnectedDisplayUiTest {
                 Column { ConnectedDisplays(caps.value) { requestedDisplay = it } }
             }
         }
-        val launch = rule.onNodeWithText(context.getString(R.string.open_workspace_on_display, external.id))
+        val launch = rule.onNodeWithText(context.getString(R.string.test_display, external.id))
         launch.performClick()
         rule.runOnIdle {
             assertEquals(external.id, requestedDisplay)
