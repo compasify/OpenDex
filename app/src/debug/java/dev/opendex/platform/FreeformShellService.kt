@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.Parcel
 import android.os.Process
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import android.view.InputEvent
@@ -37,8 +38,22 @@ internal const val INJECT_MOTION = Binder.FIRST_CALL_TRANSACTION + 5
 internal const val INJECT_KEY = Binder.FIRST_CALL_TRANSACTION + 6
 internal const val RELEASE_DISPLAY = Binder.FIRST_CALL_TRANSACTION + 7
 internal const val RELEASE_ALL_DISPLAYS = Binder.FIRST_CALL_TRANSACTION + 8
+internal const val LAUNCH_ACTION_ON_DISPLAY = Binder.FIRST_CALL_TRANSACTION + 9
 private const val DESTROY_USER_SERVICE = 16777115
 private const val PER_ANDROID_USER_UID_RANGE = 100_000
+
+private val ALLOWED_SETTINGS_ACTIONS = setOf(
+    Settings.ACTION_SETTINGS,
+    Settings.ACTION_WIFI_SETTINGS,
+    Settings.ACTION_BLUETOOTH_SETTINGS,
+    Settings.ACTION_CAST_SETTINGS,
+    Settings.ACTION_DISPLAY_SETTINGS,
+    Settings.ACTION_SOUND_SETTINGS,
+    Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS,
+    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+)
+
+private val PACKAGE_URI_PATTERN = Regex("^package:[A-Za-z0-9._]+$")
 
 private const val VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH = 1 shl 6
 private const val VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL = 1 shl 8
@@ -47,6 +62,7 @@ private const val VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP = 1 shl 11
 private const val VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED = 1 shl 12
 private const val INJECT_INPUT_EVENT_MODE_ASYNC = 0
 private const val DISPLAY_IME_POLICY_FALLBACK_DISPLAY = 1
+private const val ANIMATION_SCALE_TRANSITION = 1
 
 /** Created by Shizuku, not exported as an Android component. Accepts no arbitrary commands. */
 class FreeformShellService(private val context: Context) : Binder() {
@@ -70,6 +86,32 @@ class FreeformShellService(private val context: Context) : Binder() {
     }
 
     private val inputInjector: Pair<Any, Method>? by lazy { resolveInputInjector() }
+    private val transitionLock = Any()
+
+    private val windowManager: Any? by lazy {
+        runCatching {
+            val sm = Class.forName("android.os.ServiceManager")
+            val binder = sm.getMethod("getService", String::class.java).invoke(null, "window") as? IBinder ?: return@runCatching null
+            Class.forName("android.view.IWindowManager\$Stub")
+                .getMethod("asInterface", IBinder::class.java).invoke(null, binder)
+        }.getOrNull()
+    }
+
+    private val getAnimationScaleMethod: Method? by lazy {
+        runCatching {
+            windowManager?.javaClass?.getMethod("getAnimationScale", Int::class.javaPrimitiveType)
+        }.getOrNull()
+    }
+
+    private val setAnimationScaleMethod: Method? by lazy {
+        runCatching {
+            windowManager?.javaClass?.getMethod(
+                "setAnimationScale",
+                Int::class.javaPrimitiveType,
+                Float::class.javaPrimitiveType,
+            )
+        }.getOrNull()
+    }
 
     init { attachInterface(null, FREEFORM_DESCRIPTOR) }
 
@@ -79,7 +121,7 @@ class FreeformShellService(private val context: Context) : Binder() {
             releaseAllDisplays()
             exitProcess(0)
         }
-        if (code !in OPEN_FREEFORM..RELEASE_ALL_DISPLAYS || reply == null) {
+        if (code !in OPEN_FREEFORM..LAUNCH_ACTION_ON_DISPLAY || reply == null) {
             return super.onTransact(code, data, reply, flags)
         }
         if (caller != ownerUid || Process.myUid() != SHELL_UID) throw SecurityException("Unexpected caller or backend")
@@ -156,6 +198,16 @@ class FreeformShellService(private val context: Context) : Binder() {
                 reply.writeNoException()
                 reply.writeInt(1)
             }
+            LAUNCH_ACTION_ON_DISPLAY -> {
+                val action = data.readString()
+                val displayId = data.readInt()
+                val dataUri = data.readString()
+                val validUri = dataUri == null || (action == Settings.ACTION_APPLICATION_DETAILS_SETTINGS && PACKAGE_URI_PATTERN.matches(dataUri))
+                val ok = action != null && action in ALLOWED_SETTINGS_ACTIONS && validUri && displays.containsKey(displayId) &&
+                    launchActionOnVirtualDisplay(action, displayId, dataUri)
+                reply.writeNoException()
+                reply.writeInt(if (ok) 1 else 0)
+            }
         }
         return true
     }
@@ -203,10 +255,7 @@ class FreeformShellService(private val context: Context) : Binder() {
 
     private fun configureImeFallback(displayId: Int) {
         runCatching {
-            val sm = Class.forName("android.os.ServiceManager")
-            val binder = sm.getMethod("getService", String::class.java).invoke(null, "window") as? IBinder ?: return
-            val iwm = Class.forName("android.view.IWindowManager\$Stub")
-                .getMethod("asInterface", IBinder::class.java).invoke(null, binder) ?: return
+            val iwm = windowManager ?: return
             iwm.javaClass.getMethod("setDisplayImePolicy", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                 .invoke(iwm, displayId, DISPLAY_IME_POLICY_FALLBACK_DISPLAY)
         }.onFailure { Log.d("OpenDex", "setDisplayImePolicy skipped: ${it.message}") }
@@ -241,12 +290,100 @@ class FreeformShellService(private val context: Context) : Binder() {
         return true
     }
 
+    private fun launchActionOnVirtualDisplay(action: String, displayId: Int, dataUri: String? = null): Boolean {
+        val intent = Intent(action).apply {
+            if (dataUri != null) data = android.net.Uri.parse(dataUri)
+        }
+        val resolved = runCatching {
+            shellContext.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo
+        }.getOrNull()
+        val targetComponent = resolved?.let { ComponentName(it.packageName, it.name) }
+
+        // Move any existing task for the target settings package onto this virtual display first so it never pulls focus to Display 0.
+        if (targetComponent != null) {
+            runAm("stack", "list")?.let { stacks ->
+                val existing = findComponentRootTask(stacks, targetComponent.flattenToString(), targetComponent.flattenToShortString(), userId)
+                if (existing != null && existing.displayId != displayId) {
+                    runAm("display", "move-stack", existing.rootTaskId.toString(), displayId.toString())
+                }
+            }
+        }
+
+        val startArgs = buildList {
+            add("start")
+            add("-W")
+            add("--user"); add(userId.toString())
+            add("--display"); add(displayId.toString())
+            add("--windowingMode"); add("1")
+            add("-a"); add(action)
+            if (dataUri != null) {
+                add("-d"); add(dataUri)
+            }
+            add("-f"); add("0x10000000")
+        }
+        val started = runAm(*startArgs.toTypedArray())
+        if (started == null) return false
+
+        if (targetComponent != null) {
+            val stacksAfter = runAm("stack", "list") ?: return true
+            val after = findComponentRootTask(stacksAfter, targetComponent.flattenToString(), targetComponent.flattenToShortString(), userId)
+            if (after != null && after.displayId != displayId) {
+                runAm("display", "move-stack", after.rootTaskId.toString(), displayId.toString())
+                val retryArgs = buildList {
+                    add("start")
+                    add("--user"); add(userId.toString())
+                    add("--display"); add(displayId.toString())
+                    add("--windowingMode"); add("1")
+                    add("-a"); add(action)
+                    if (dataUri != null) {
+                        add("-d"); add(dataUri)
+                    }
+                    add("-f"); add("0x10000000")
+                }
+                runAm(*retryArgs.toTypedArray())
+            }
+        }
+        return true
+    }
+
     private fun resizeVirtualDisplay(displayId: Int, width: Int, height: Int, densityDpi: Int): Boolean {
         val hosted = displays[displayId] ?: return false
         return runCatching {
-            hosted.virtualDisplay.resize(width, height, densityDpi)
+            withoutTransitionAnimation {
+                hosted.virtualDisplay.resize(width, height, densityDpi)
+            }
             true
         }.onFailure { Log.w("OpenDex", "resizeVirtualDisplay failed for display $displayId", it) }.getOrDefault(false)
+    }
+
+    /**
+     * Suppress the system display-change transition animation while resizing a VirtualDisplay.
+     * Some ROMs (e.g. HyperOS/MIUI) leak the VirtualDisplay's TRANSIT_CHANGE screenshot leash
+     * onto Display 0 at (0, 0), causing a visible top-left flash on every window resize.
+     */
+    private fun withoutTransitionAnimation(action: () -> Unit) {
+        val iwm = windowManager
+        val getScale = getAnimationScaleMethod
+        val setScale = setAnimationScaleMethod
+        if (iwm == null || getScale == null || setScale == null) {
+            action()
+            return
+        }
+        synchronized(transitionLock) {
+            val previous = runCatching { getScale.invoke(iwm, ANIMATION_SCALE_TRANSITION) as? Float }.getOrNull()
+            val suppressed = previous != null && previous > 0f &&
+                runCatching { setScale.invoke(iwm, ANIMATION_SCALE_TRANSITION, 0f) }.isSuccess
+            try {
+                action()
+                if (suppressed) {
+                    SystemClock.sleep(140)
+                }
+            } finally {
+                if (suppressed) {
+                    runCatching { setScale.invoke(iwm, ANIMATION_SCALE_TRANSITION, previous) }
+                }
+            }
+        }
     }
 
     private fun setVirtualDisplaySurface(displayId: Int, surface: Surface?): Boolean {

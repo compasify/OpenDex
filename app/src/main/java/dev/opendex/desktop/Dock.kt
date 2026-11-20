@@ -22,7 +22,9 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -68,6 +70,7 @@ internal fun Dock(
     windowManagerOpen: Boolean,
     quickSettingsOpen: Boolean,
     notificationsOpen: Boolean,
+    calendarOpen: Boolean,
     external: Boolean,
     systemStatus: SystemStatus,
     notificationCount: Int,
@@ -75,24 +78,28 @@ internal fun Dock(
     onWindowManager: () -> Unit,
     onQuickSettings: () -> Unit,
     onNotifications: () -> Unit,
+    onCalendar: () -> Unit,
     onOpen: (InstalledApp) -> Unit,
     onPin: (InstalledApp) -> Unit,
     onTool: (Tool) -> Unit,
-    onOpenFreeform: ((InstalledApp) -> Unit)?,
-    onOpenFullscreen: ((InstalledApp) -> Unit)? = null,
-    onFitAboveDock: ((InstalledApp) -> Unit)? = null,
     appWindows: List<AppWindowState> = emptyList(),
     onAppWindow: ((AppWindowState) -> Unit)? = null,
     onCloseAppWindow: ((String) -> Unit)? = null,
     onOpenInWindow: ((InstalledApp) -> Unit)? = null,
     onToggleDockStyle: (() -> Unit)? = null,
     onShowDesktop: (() -> Unit)? = null,
+    onToggleShowDesktop: (() -> Unit)? = null,
+    desktopApps: List<String> = emptyList(),
+    onToggleDesktopApp: ((InstalledApp) -> Unit)? = null,
+    onAppInfo: ((InstalledApp) -> Unit)? = null,
+    onUninstallApp: ((InstalledApp) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val byId = remember(apps) { apps.associateBy { it.id } }
     val openById = remember(appWindows) { appWindows.associateBy { it.appId } }
     val floating = style == DockStyle.Floating
     val totalOpenCount = windows.size + appWindows.count { it.appId in byId }
+    val hasVisibleWindows = windows.any { !it.minimized } || appWindows.any { !it.minimized && it.appId in byId }
     val shape = RoundedCornerShape(if (floating) 18.dp else 0.dp)
     val buttonDp = dockSize.buttonDp.dp
     val iconDp = dockSize.iconDp
@@ -141,7 +148,10 @@ internal fun Dock(
                 val history = recent.filterNot { it in pins || it in openIds }.mapNotNull(byId::get)
                 val hasCenterItems = windows.isNotEmpty() || pinnedApps.isNotEmpty() || unpinnedOpen.isNotEmpty() || history.isNotEmpty()
                 Row(
-                    Modifier.height(dockSize.heightDp.dp).padding(horizontal = if (floating) 8.dp else 10.dp),
+                    Modifier.height(dockSize.heightDp.dp).padding(
+                        start = if (floating) 8.dp else 10.dp,
+                        end = if (onToggleShowDesktop != null && !floating) 0.dp else if (floating) 6.dp else 10.dp,
+                    ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
@@ -181,12 +191,13 @@ internal fun Dock(
                                 AppButton(
                                     app = app,
                                     pinned = true,
+                                    onDesktop = app.id in desktopApps,
                                     onOpen = { if (openWindow != null && onAppWindow != null) onAppWindow(openWindow) else onOpen(app) },
                                     onPin = { onPin(app) },
+                                    onToggleDesktop = onToggleDesktopApp?.let { { it(app) } },
+                                    onAppInfo = onAppInfo?.let { { it(app) } },
+                                    onUninstall = if (!app.isSystemApp) onUninstallApp?.let { { it(app) } } else null,
                                     onOpenInWindow = onOpenInWindow?.let { { it(app) } },
-                                    onOpenFreeform = onOpenFreeform?.let { { it(app) } },
-                                    onOpenFullscreen = onOpenFullscreen?.let { { it(app) } },
-                                    onFitAboveDock = onFitAboveDock?.let { { it(app) } },
                                     onCloseWindow = if (openWindow != null && onCloseAppWindow != null) ({ onCloseAppWindow(app.id) }) else null,
                                     running = openWindow != null,
                                     runningVisible = openWindow != null && !openWindow.minimized,
@@ -201,12 +212,13 @@ internal fun Dock(
                                 AppButton(
                                     app = app,
                                     pinned = false,
+                                    onDesktop = app.id in desktopApps,
                                     onOpen = { if (onAppWindow != null) onAppWindow(openWindow) else onOpen(app) },
                                     onPin = { onPin(app) },
+                                    onToggleDesktop = onToggleDesktopApp?.let { { it(app) } },
+                                    onAppInfo = onAppInfo?.let { { it(app) } },
+                                    onUninstall = if (!app.isSystemApp) onUninstallApp?.let { { it(app) } } else null,
                                     onOpenInWindow = onOpenInWindow?.let { { it(app) } },
-                                    onOpenFreeform = onOpenFreeform?.let { { it(app) } },
-                                    onOpenFullscreen = onOpenFullscreen?.let { { it(app) } },
-                                    onFitAboveDock = onFitAboveDock?.let { { it(app) } },
                                     onCloseWindow = onCloseAppWindow?.let { { it(app.id) } },
                                     running = true,
                                     runningVisible = !openWindow.minimized,
@@ -218,12 +230,13 @@ internal fun Dock(
                                 AppButton(
                                     app = app,
                                     pinned = false,
+                                    onDesktop = app.id in desktopApps,
                                     onOpen = { onOpen(app) },
                                     onPin = { onPin(app) },
+                                    onToggleDesktop = onToggleDesktopApp?.let { { it(app) } },
+                                    onAppInfo = onAppInfo?.let { { it(app) } },
+                                    onUninstall = if (!app.isSystemApp) onUninstallApp?.let { { it(app) } } else null,
                                     onOpenInWindow = onOpenInWindow?.let { { it(app) } },
-                                    onOpenFreeform = onOpenFreeform?.let { { it(app) } },
-                                    onOpenFullscreen = onOpenFullscreen?.let { { it(app) } },
-                                    onFitAboveDock = onFitAboveDock?.let { { it(app) } },
                                     buttonSize = buttonDp,
                                     iconSizeDp = iconDp,
                                 )
@@ -265,10 +278,20 @@ internal fun Dock(
                         DockClock(
                             external = external,
                             compact = dockSize == DockSize.Compact,
-                            onClick = if (canShowTray) onQuickSettings else null,
+                            selected = calendarOpen,
+                            height = buttonDp,
+                            onClick = onCalendar,
                         )
                     }
-                    ToolButton(Icons.Default.Tune, stringResource(R.string.settings_and_diagnostics), { onTool(Tool.Settings) }, size = buttonDp)
+                    if (onToggleShowDesktop != null) {
+                        ShowDesktopSliver(
+                            hasVisibleWindows = hasVisibleWindows,
+                            hasOpenWindows = totalOpenCount > 0,
+                            floating = floating,
+                            height = if (floating) buttonDp else dockSize.heightDp.dp,
+                            onClick = onToggleShowDesktop,
+                        )
+                    }
                 }
             }
 
@@ -302,6 +325,57 @@ private fun DockDivider(dockHeightDp: Int) = VerticalDivider(
     Modifier.height((dockHeightDp * 0.45f).dp),
     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
 )
+
+@Composable
+private fun ShowDesktopSliver(
+    hasVisibleWindows: Boolean,
+    hasOpenWindows: Boolean,
+    floating: Boolean,
+    height: Dp,
+    onClick: () -> Unit,
+) {
+    val interactions = remember { MutableInteractionSource() }
+    val focus by interactions.collectIsFocusedAsState()
+    val hover by interactions.collectIsHoveredAsState()
+    val colors = MaterialTheme.colorScheme
+    val shape = if (floating) RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp, topStart = 3.dp, bottomStart = 3.dp)
+        else RoundedCornerShape(0.dp)
+    val label = stringResource(if (hasVisibleWindows || !hasOpenWindows) R.string.minimize_all_windows else R.string.restore_all_windows)
+    val minimizedReady = hasOpenWindows && !hasVisibleWindows
+    val fill = when {
+        hover || focus -> colors.onSurface.copy(alpha = 0.12f)
+        minimizedReady -> colors.primary.copy(alpha = 0.10f)
+        else -> Color.Transparent
+    }
+    val edgeColor = when {
+        hover || focus || minimizedReady -> colors.primary.copy(alpha = 0.75f)
+        else -> colors.outlineVariant.copy(alpha = 0.55f)
+    }
+    Row(
+        Modifier.height(height)
+            .width(14.dp)
+            .clip(shape)
+            .background(fill)
+            .then(if (focus) Modifier.border(1.5.dp, colors.primary, shape) else Modifier)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .clickable(
+                interactionSource = interactions,
+                indication = LocalIndication.current,
+                enabled = hasOpenWindows,
+                role = Role.Button,
+                onClickLabel = label,
+                onClick = onClick,
+            )
+            .semantics { contentDescription = label },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.width(if (hover || focus || minimizedReady) 1.5.dp else 1.dp)
+                .fillMaxHeight(if (floating) 0.55f else 0.52f)
+                .background(edgeColor),
+        )
+    }
+}
 
 @Composable
 private fun WindowManagerButton(count: Int, selected: Boolean, size: Dp, onClick: () -> Unit) {
@@ -345,8 +419,18 @@ private fun WindowManagerButton(count: Int, selected: Boolean, size: Dp, onClick
 }
 
 @Composable
-private fun DockClock(external: Boolean, compact: Boolean, onClick: (() -> Unit)? = null) {
+private fun DockClock(
+    external: Boolean,
+    compact: Boolean,
+    selected: Boolean,
+    height: Dp,
+    onClick: () -> Unit,
+) {
     val context = LocalContext.current
+    val interactions = remember { MutableInteractionSource() }
+    val hovered by interactions.collectIsHoveredAsState()
+    val focused by interactions.collectIsFocusedAsState()
+    val colors = MaterialTheme.colorScheme
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -357,13 +441,24 @@ private fun DockClock(external: Boolean, compact: Boolean, onClick: (() -> Unit)
     val date = remember(now) { Date(now) }
     val timeText = android.text.format.DateFormat.getTimeFormat(context).format(date)
     val dateText = DateFormat.getDateInstance(DateFormat.MEDIUM).format(date)
-    val shape = RoundedCornerShape(8.dp)
-    val clickModifier = if (onClick != null) {
-        Modifier.clip(shape).pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Button, onClick = onClick)
-    } else Modifier
+    val shape = RoundedCornerShape(10.dp)
+    val label = stringResource(R.string.calendar)
+    val fill = when {
+        selected -> colors.secondaryContainer
+        hovered || focused -> colors.surfaceContainerHighest
+        else -> Color.Transparent
+    }
     Column(
-        clickModifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        Modifier.height(height)
+            .clip(shape)
+            .background(fill)
+            .then(if (focused) Modifier.border(1.5.dp, colors.primary, shape) else Modifier)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .clickable(interactions, LocalIndication.current, role = Role.Button, onClickLabel = label, onClick = onClick)
+            .padding(horizontal = 8.dp)
+            .semantics { contentDescription = label },
         horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.Center,
     ) {
         Text(
             timeText,
@@ -374,7 +469,7 @@ private fun DockClock(external: Boolean, compact: Boolean, onClick: (() -> Unit)
             Text(
                 if (external) stringResource(R.string.external_display) else dateText,
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = colors.onSurfaceVariant,
                 maxLines = 1,
             )
         }
@@ -540,24 +635,17 @@ internal fun ToolButton(
         val focus by interactions.collectIsFocusedAsState()
         val hover by interactions.collectIsHoveredAsState()
         val colors = MaterialTheme.colorScheme
-        val shape = RoundedCornerShape(11.dp)
+        val shape = RoundedCornerShape(if (desktop) 8.dp else 11.dp)
         val fill = when {
             selected -> colors.secondaryContainer
-            hover || focus -> colors.surfaceContainerHighest
-            desktop -> colors.surfaceContainer.copy(alpha = 0.72f)
+            hover || focus -> if (desktop) Color.White.copy(alpha = 0.16f) else colors.surfaceContainerHighest
             else -> Color.Transparent
         }
         Box(
             Modifier.size(size)
                 .clip(shape)
                 .background(fill)
-                .then(
-                    when {
-                        focus -> Modifier.border(2.dp, colors.primary, shape)
-                        desktop -> Modifier.border(1.dp, colors.outlineVariant.copy(alpha = 0.45f), shape)
-                        else -> Modifier
-                    },
-                )
+                .then(if (focus) Modifier.border(2.dp, colors.primary, shape) else Modifier)
                 .pointerHoverIcon(PointerIcon.Hand)
                 .clickable(interactions, indication = LocalIndication.current, role = Role.Button, onClickLabel = label, onClick = onClick)
                 .semantics { contentDescription = label },
@@ -566,8 +654,8 @@ internal fun ToolButton(
             Icon(
                 icon,
                 null,
-                modifier = Modifier.size(if (size <= 40.dp) 19.dp else 22.dp),
-                tint = if (desktop && !hover && !focus) colors.primary else colors.primary,
+                modifier = Modifier.size(if (desktop) 30.dp else if (size <= 40.dp) 19.dp else 22.dp),
+                tint = if (desktop) Color.White else colors.primary,
             )
             if (!desktop && running) {
                 Box(
@@ -580,21 +668,17 @@ internal fun ToolButton(
             }
         }
         if (desktop) {
-            Surface(
+            Text(
+                label,
                 Modifier.padding(top = 4.dp),
-                shape = RoundedCornerShape(6.dp),
-                color = colors.surfaceContainer.copy(alpha = 0.65f),
-            ) {
-                Text(
-                    label,
-                    Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    color = colors.onSurface,
-                    style = MaterialTheme.typography.labelSmall,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    shadow = Shadow(color = Color.Black.copy(alpha = 0.8f), offset = Offset(0f, 1.5f), blurRadius = 4f),
+                ),
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -608,10 +692,11 @@ internal fun AppDrawer(
     onTogglePin: (InstalledApp) -> Unit,
     onTool: (Tool) -> Unit,
     onClose: () -> Unit,
-    onOpenFreeform: ((InstalledApp) -> Unit)?,
-    onOpenFullscreen: ((InstalledApp) -> Unit)? = null,
-    onFitAboveDock: ((InstalledApp) -> Unit)? = null,
     onOpenInWindow: ((InstalledApp) -> Unit)? = null,
+    desktopApps: List<String> = emptyList(),
+    onToggleDesktopApp: ((InstalledApp) -> Unit)? = null,
+    onAppInfo: ((InstalledApp) -> Unit)? = null,
+    onUninstallApp: ((InstalledApp) -> Unit)? = null,
     focusSearchOnOpen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -732,12 +817,13 @@ internal fun AppDrawer(
                             AppButton(
                                 app = app,
                                 pinned = app.id in pins,
+                                onDesktop = app.id in desktopApps,
                                 onOpen = { onOpen(app) },
                                 onPin = { onTogglePin(app) },
+                                onToggleDesktop = onToggleDesktopApp?.let { { it(app) } },
+                                onAppInfo = onAppInfo?.let { { it(app) } },
+                                onUninstall = if (!app.isSystemApp) onUninstallApp?.let { { it(app) } } else null,
                                 onOpenInWindow = onOpenInWindow?.let { { it(app) } },
-                                onOpenFreeform = onOpenFreeform?.let { { it(app) } },
-                                onOpenFullscreen = onOpenFullscreen?.let { { it(app) } },
-                                onFitAboveDock = onFitAboveDock?.let { { it(app) } },
                                 isRow = true,
                                 highlighted = index == selected && (query.isNotBlank() || scrollToSelection),
                                 running = app.id in runningAppIds,
@@ -762,9 +848,10 @@ private fun AppButton(
     pinned: Boolean,
     onOpen: () -> Unit,
     onPin: () -> Unit,
-    onOpenFreeform: (() -> Unit)?,
-    onOpenFullscreen: (() -> Unit)? = null,
-    onFitAboveDock: (() -> Unit)? = null,
+    onDesktop: Boolean = false,
+    onToggleDesktop: (() -> Unit)? = null,
+    onAppInfo: (() -> Unit)? = null,
+    onUninstall: (() -> Unit)? = null,
     onOpenInWindow: (() -> Unit)? = null,
     onCloseWindow: (() -> Unit)? = null,
     isRow: Boolean = false,
@@ -847,25 +934,25 @@ private fun AppButton(
                 leadingIcon = { Icon(Icons.Default.Window, null, Modifier.size(18.dp)) },
                 onClick = { menu = false; onOpenInWindow() },
             )
-            if (onOpenFullscreen != null) DropdownMenuItem(
-                text = { Text(stringResource(R.string.open_app_fullscreen)) },
-                leadingIcon = { Icon(Icons.Default.Fullscreen, null, Modifier.size(18.dp)) },
-                onClick = { menu = false; onOpenFullscreen() },
-            )
-            if (onOpenFreeform != null) DropdownMenuItem(
-                text = { Text(stringResource(R.string.open_app_freeform_adb)) },
-                leadingIcon = { Icon(Icons.Default.PictureInPictureAlt, null, Modifier.size(18.dp)) },
-                onClick = { menu = false; onOpenFreeform() },
-            )
-            if (onFitAboveDock != null) DropdownMenuItem(
-                text = { Text(stringResource(R.string.fit_above_dock)) },
-                leadingIcon = { Icon(Icons.Default.CropSquare, null, Modifier.size(18.dp)) },
-                onClick = { menu = false; onFitAboveDock() },
-            )
             DropdownMenuItem(
                 text = { Text(stringResource(if (pinned) R.string.unpin else R.string.pin_to_dock)) },
                 onClick = { menu = false; onPin() },
                 leadingIcon = { Icon(Icons.Default.PushPin, null, Modifier.size(18.dp)) },
+            )
+            if (onToggleDesktop != null) DropdownMenuItem(
+                text = { Text(stringResource(if (onDesktop) R.string.remove_from_desktop else R.string.add_to_desktop)) },
+                onClick = { menu = false; onToggleDesktop() },
+                leadingIcon = { Icon(Icons.Default.DesktopWindows, null, Modifier.size(18.dp)) },
+            )
+            if (onAppInfo != null) DropdownMenuItem(
+                text = { Text(stringResource(R.string.app_info)) },
+                onClick = { menu = false; onAppInfo() },
+                leadingIcon = { Icon(Icons.Default.Info, null, Modifier.size(18.dp)) },
+            )
+            if (onUninstall != null) DropdownMenuItem(
+                text = { Text(stringResource(R.string.uninstall_app), color = colors.error) },
+                onClick = { menu = false; onUninstall() },
+                leadingIcon = { Icon(Icons.Default.DeleteOutline, null, Modifier.size(18.dp), tint = colors.error) },
             )
             if (onCloseWindow != null) {
                 HorizontalDivider()

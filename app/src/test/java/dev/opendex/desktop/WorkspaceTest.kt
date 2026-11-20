@@ -1,5 +1,14 @@
 package dev.opendex.desktop
 
+import dev.opendex.data.DisplayScale
+import dev.opendex.data.WindowResizeMode
+import dev.opendex.data.WindowScale
+import dev.opendex.data.WorkspacePreferences
+import dev.opendex.data.computeHostedDensityDpi
+import dev.opendex.data.logicalResolution
+import dev.opendex.platform.cleanWifiSsid
+import java.util.Calendar
+
 import dev.opendex.platform.AdbAccess
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -119,5 +128,77 @@ class WorkspaceTest {
             DesktopWindow(Tool.Settings, Bounds(10f, 10f, 400f, 300f), minimized = false),
         ).minimizeAllTools()
         assertTrue(tools.all { it.minimized })
+        assertTrue(apps.restoreApps(setOf("a/.A")).let { !it[0].minimized && it[1].minimized })
+        assertTrue(apps.restoreApps().all { !it.minimized })
+        assertTrue(tools.restoreTools(setOf(Tool.Notes)).let { !it[0].minimized && it[1].minimized })
+        assertTrue(tools.restoreTools().all { !it.minimized })
+    }
+
+    @Test fun wifiSsidCleanerHandlesQuotesAndPlaceholders() {
+        assertEquals("Office_5GHz", cleanWifiSsid("\"Office_5GHz\""))
+        assertEquals("Cafe Wifi", cleanWifiSsid("  \"Cafe Wifi\"  "))
+        assertEquals(null, cleanWifiSsid("<unknown ssid>"))
+        assertEquals(null, cleanWifiSsid("\"<unknown ssid>\""))
+        assertEquals(null, cleanWifiSsid("0x"))
+        assertEquals(null, cleanWifiSsid("   "))
+        assertEquals(null, cleanWifiSsid(null))
+    }
+
+    @Test fun calendarMonthGridAlwaysProduces42AlignedCells() {
+        // November 2026 starts on Sunday (Calendar.SUNDAY = 1), 30 days.
+        val gridSunFirst = buildMonthGrid(2026, Calendar.NOVEMBER, Calendar.SUNDAY)
+        assertEquals(42, gridSunFirst.size)
+        assertEquals(CalendarDayCell(2026, Calendar.NOVEMBER, 1, inCurrentMonth = true), gridSunFirst.first())
+        assertEquals(30, gridSunFirst.count { it.inCurrentMonth })
+
+        val gridMonFirst = buildMonthGrid(2026, Calendar.NOVEMBER, Calendar.MONDAY)
+        assertEquals(42, gridMonFirst.size)
+        assertEquals(CalendarDayCell(2026, Calendar.OCTOBER, 26, inCurrentMonth = false), gridMonFirst.first())
+        assertEquals(CalendarDayCell(2026, Calendar.NOVEMBER, 1, inCurrentMonth = true), gridMonFirst[6])
+        assertEquals(30, gridMonFirst.count { it.inCurrentMonth })
+    }
+
+    @Test fun hostedDensityDpiNormalizesHighDpiScreensWithoutShrinkingMonitors() {
+        // 1080p external monitor (160 dpi): stays native at Standard.
+        assertEquals(160, computeHostedDensityDpi(160, WindowScale.Standard))
+        assertEquals(136, computeHostedDensityDpi(160, WindowScale.Compact))
+        assertEquals(192, computeHostedDensityDpi(160, WindowScale.Comfortable))
+        // 320 dpi tablet: normalized to 240 dpi desktop scale at Standard.
+        assertEquals(240, computeHostedDensityDpi(320, WindowScale.Standard))
+        assertEquals(204, computeHostedDensityDpi(320, WindowScale.Compact))
+        assertEquals(288, computeHostedDensityDpi(320, WindowScale.Comfortable))
+        // 440 dpi phone: normalized to 330 dpi at Standard.
+        assertEquals(330, computeHostedDensityDpi(440, WindowScale.Standard))
+        // DisplayScale scales hosted apps proportionally too.
+        assertEquals(180, computeHostedDensityDpi(320, WindowScale.Standard, DisplayScale.MoreSpace))
+        assertEquals(300, computeHostedDensityDpi(320, WindowScale.Standard, DisplayScale.Larger))
+    }
+
+    @Test fun logicalResolutionMatchesMacOsScaledDisplayMath() {
+        // 2560x1600 @ 2.0x native density (320 dpi tablet):
+        assertEquals(1707 to 1067, logicalResolution(2560, 1600, 2.0f, DisplayScale.MoreSpace))
+        assertEquals(1280 to 800, logicalResolution(2560, 1600, 2.0f, DisplayScale.Default))
+        assertEquals(1024 to 640, logicalResolution(2560, 1600, 2.0f, DisplayScale.Larger))
+        // 1920x1080 @ 1.0x external monitor:
+        assertEquals(1920 to 1080, logicalResolution(1920, 1080, 1.0f, DisplayScale.Default))
+        assertEquals(1536 to 864, logicalResolution(1920, 1080, 1.0f, DisplayScale.Larger))
+    }
+
+    @Test fun edgeSnapTargetsLeftRightTopAndRespectsCanTile() {
+        val wide = Area(1000f, 600f)
+        assertEquals(Placement.Left, detectEdgeSnap(10f, 200f, wide))
+        assertEquals(Placement.Right, detectEdgeSnap(990f, 200f, wide))
+        assertEquals(Placement.Full, detectEdgeSnap(500f, 8f, wide))
+        assertEquals(null, detectEdgeSnap(500f, 200f, wide))
+
+        val narrow = Area(400f, 600f)
+        assertEquals(null, detectEdgeSnap(10f, 200f, narrow))
+        assertEquals(null, detectEdgeSnap(390f, 200f, narrow))
+        assertEquals(Placement.Full, detectEdgeSnap(200f, 8f, narrow))
+    }
+
+    @Test fun windowResizeModeDefaultsToLiveAndExposesBothStyles() {
+        assertEquals(WindowResizeMode.Live, WorkspacePreferences().windowResizeMode)
+        assertEquals(listOf(WindowResizeMode.Live, WindowResizeMode.Outline), WindowResizeMode.entries)
     }
 }

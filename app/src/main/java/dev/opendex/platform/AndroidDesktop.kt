@@ -8,9 +8,11 @@ import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.hardware.display.DisplayManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.view.Display
@@ -20,7 +22,12 @@ import dev.opendex.MainActivity
 import java.text.Collator
 import java.util.Locale
 
-data class InstalledApp(val component: ComponentName, val label: String, val icon: Drawable) {
+data class InstalledApp(
+    val component: ComponentName,
+    val label: String,
+    val icon: Drawable,
+    val isSystemApp: Boolean = false,
+) {
     val id: String get() = component.flattenToShortString()
 }
 
@@ -32,8 +39,13 @@ fun Context.installedApps(): List<InstalledApp> {
         val activity = entry.activityInfo
         if (!activity.exported || activity.packageName == packageName) return@mapNotNull null
         if (activity.permission?.let { manager.checkPermission(it, packageName) != PackageManager.PERMISSION_GRANTED } == true) return@mapNotNull null
-        InstalledApp(ComponentName(activity.packageName, activity.name),
-            entry.loadLabel(manager).toString(), entry.loadIcon(manager))
+        val isSystem = (activity.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+        InstalledApp(
+            ComponentName(activity.packageName, activity.name),
+            entry.loadLabel(manager).toString(),
+            entry.loadIcon(manager),
+            isSystemApp = isSystem,
+        )
     }.distinctBy { it.id }.sortedWith { a, b -> collator.compare(a.label, b.label) }
 }
 
@@ -96,6 +108,18 @@ class AndroidDesktop(private val activity: Activity) {
 
     fun open(app: InstalledApp, displayId: Int): LaunchResult = launch(
         Intent.makeMainActivity(app.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), displayId,
+    )
+
+    fun openAppInfo(app: InstalledApp, displayId: Int): LaunchResult = launch(
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", app.component.packageName, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        displayId,
+    )
+
+    fun requestUninstall(app: InstalledApp, displayId: Int): LaunchResult = launch(
+        Intent(Intent.ACTION_DELETE, Uri.fromParts("package", app.component.packageName, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        displayId,
     )
 
     fun openWorkspaceOn(displayId: Int): LaunchResult = launch(workspaceIntent(), displayId)

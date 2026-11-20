@@ -1,5 +1,4 @@
 <resources>
-    <string name="fit_above_dock">Maximize above dock</string>
     <string name="adb_fit_failed">Android did not resize this window to fit above the dock.</string>
     <string name="adb_window_title">Floating apps (ADB)</string>
     <string name="adb_not_running">Start Shizuku using ADB to enable this optional action. Standard app launches still work.</string>
@@ -9,9 +8,7 @@
     <string name="adb_grant">Allow via Shizuku</string>
     <string name="adb_permission_unavailable">Could not request permission. Check OpenDex in Shizuku’s Authorized applications and try again.</string>
     <string name="adb_launch_failed">The floating launch was not accepted. Check Shizuku or open the app normally.</string>
-    <string name="open_app_freeform_adb">Open in native floating window (ADB)</string>
     <string name="open_app_in_window">Open in window</string>
-    <string name="open_app_fullscreen">Open fullscreen</string>
     <string name="maximize_window">Maximize %1$s</string>
     <string name="restore_window">Restore %1$s</string>
     <string name="hosted_window_failed">Could not open %1$s in a window. Check Shizuku or open fullscreen.</string>
@@ -24,7 +21,6 @@
     <string name="notes">Notes</string>
     <string name="workspace_settings">Workspace settings</string>
     <string name="apps">Apps</string>
-    <string name="settings_and_diagnostics">Settings and device check</string>
     <string name="minimized_tool">%1$s (minimized)</string>
     <string name="close_app_drawer">Close app drawer</string>
     <string name="search_apps">Search apps</string>
@@ -34,6 +30,10 @@
     <string name="pinned">Pinned</string>
     <string name="pin_to_dock">Pin to dock</string>
     <string name="unpin">Unpin</string>
+    <string name="add_to_desktop">Add to desktop</string>
+    <string name="remove_from_desktop">Remove from desktop</string>
+    <string name="app_info">App info</string>
+    <string name="uninstall_app">Uninstall</string>
     <string name="open_app">Open %1$s</string>
     <string name="app_options">Options for %1$s</string>
     <string name="close">Close</string>
@@ -71,15 +71,28 @@
     <string name="show_clock">Show clock in dock</string>
     <string name="show_system_tray">Show system tray &amp; notifications</string>
     <string name="show_desktop_shortcuts">Show desktop shortcuts</string>
+    <string name="display_resolution_title">Display resolution &amp; scale</string>
+    <string name="display_resolution_summary">Looks like %1$d × %2$d (%3$d%%) · Native %4$d × %5$d px</string>
+    <string name="display_scale_more_space">More space</string>
+    <string name="display_scale_compact">Compact</string>
+    <string name="display_scale_default">Default</string>
+    <string name="display_scale_large">Large</string>
+    <string name="display_scale_larger">Larger</string>
     <string name="window_scale">App window scale</string>
     <string name="scale_compact">Compact</string>
     <string name="scale_standard">Standard</string>
     <string name="scale_comfortable">Comfortable</string>
+    <string name="window_resize_mode">Window resize style</string>
+    <string name="resize_mode_live">Live frame</string>
+    <string name="resize_mode_outline">Outline preview</string>
+    <string name="resize_dimensions" translatable="false">%1$d × %2$d</string>
     <string name="app_windows_section">App windows</string>
     <string name="restore_open_apps">Remember open apps</string>
     <string name="restore_open_apps_desc">Keep and restore open app windows when returning to OpenDex.</string>
     <string name="close_all_windows">Close all</string>
     <string name="minimize_all">Minimize all</string>
+    <string name="minimize_all_windows">Minimize all windows</string>
+    <string name="restore_all_windows">Restore all windows</string>
     <string name="no_open_windows">No windows open.</string>
     <string name="window_state_open">Open</string>
     <string name="window_state_minimized">Minimized</string>
@@ -109,8 +122,8 @@
     <string name="tray_wifi">Wi-Fi</string>
     <string name="tray_bluetooth">Bluetooth</string>
     <string name="tray_sound">Sound</string>
-    <string name="tray_cast">Wireless cast</string>
-    <string name="tray_cast_sub">Display</string>
+    <string name="tray_cast">Cast</string>
+    <string name="tray_cast_sub">Wireless</string>
     <string name="tray_display">Display</string>
     <string name="tray_brightness">Brightness</string>
     <string name="tray_connected">Connected</string>
@@ -127,6 +140,14 @@
     <string name="enable_notification_access">Enable notification access</string>
     <string name="no_notifications">No new notifications.</string>
     <string name="dismiss_notification">Dismiss notification</string>
+    <string name="notification_now">Now</string>
+    <string name="open_notification_in_window">Open app in window</string>
+    <string name="wifi_show_name_prompt">Allow location access to display the Wi-Fi network name</string>
+    <string name="wifi_show_name_action">Show name</string>
+    <string name="calendar">Calendar</string>
+    <string name="calendar_prev_month">Previous month</string>
+    <string name="calendar_next_month">Next month</string>
+    <string name="calendar_today">Today</string>
     <string name="dock_panel">Full width</string>
     <string name="dock_floating">Floating</string>
     <string name="setting_selected">Selected</string>

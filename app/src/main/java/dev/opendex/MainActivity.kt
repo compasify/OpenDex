@@ -1,5 +1,6 @@
 package dev.opendex
 
+import android.Manifest
 import android.app.Application
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
@@ -64,6 +65,9 @@ class MainActivity : ComponentActivity() {
     private val wallpaperPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) model.importCustomWallpaper(uri)
     }
+    private val locationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        systemTray.onPermissionsChanged()
+    }
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = refresh()
         override fun onDisplayRemoved(displayId: Int) = refresh()
@@ -92,6 +96,7 @@ class MainActivity : ComponentActivity() {
             val windowOrder by model.windowOrder.collectAsStateWithLifecycle()
             val systemStatus by systemTray.status.collectAsStateWithLifecycle()
             val notifications by NotificationCenterStore.notifications.collectAsStateWithLifecycle()
+            val notificationBanners by NotificationCenterStore.banners.collectAsStateWithLifecycle()
             OpenDexTheme(preferences?.theme) {
                 Desktop(
                     preferences = preferences,
@@ -110,9 +115,13 @@ class MainActivity : ComponentActivity() {
                     systemStatus = systemStatus,
                     systemTray = systemTray,
                     notifications = notifications,
+                    notificationBanners = notificationBanners,
                     notificationAccessGranted = notificationAccessGranted,
                     onPickWallpaper = {
                         runCatching { wallpaperPicker.launch(arrayOf("image/*")) }.isSuccess
+                    },
+                    onRequestLocationPermission = {
+                        runCatching { locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
                     },
                     onBrightnessChange = { fraction -> systemTray.setBrightness(fraction, window) },
                     onMoveToBackground = { moveTaskToBack(true) },
@@ -216,6 +225,9 @@ class WorkspaceModel(application: Application) : AndroidViewModel(application) {
     fun openAppWindow(external: Boolean, appId: String, area: Area) =
         runtime.openAppWindow(external, appId, area)
 
+    fun openAppWindowWithAction(external: Boolean, appId: String, action: String, area: Area, dataUri: String? = null) =
+        runtime.openAppWindowWithAction(external, appId, action, area, dataUri)
+
     fun activateAppWindow(external: Boolean, appId: String) =
         runtime.activateAppWindow(external, appId)
 
@@ -223,6 +235,9 @@ class WorkspaceModel(application: Application) : AndroidViewModel(application) {
         runtime.updateAppWindow(external, appId, persist = true, transform = transform)
 
     fun minimizeAllAppWindows(external: Boolean) = runtime.minimizeAllAppWindows(external)
+
+    fun restoreAppWindows(external: Boolean, appIds: Set<String>? = null) =
+        runtime.restoreAppWindows(external, appIds)
 
     fun closeAppWindow(external: Boolean, appId: String) = runtime.closeAppWindow(external, appId)
 
@@ -239,8 +254,14 @@ class WorkspaceModel(application: Application) : AndroidViewModel(application) {
         onFailure: (InstalledApp) -> Unit,
     ): Long = runtime.attachAppSurface(external, app, surface, width, height, densityDpi, onFailure)
 
-    fun resizeAppSurface(external: Boolean, appId: String, width: Int, height: Int, densityDpi: Int) =
-        runtime.resizeAppSurface(external, appId, width, height, densityDpi)
+    fun resizeAppSurface(
+        external: Boolean,
+        appId: String,
+        width: Int,
+        height: Int,
+        densityDpi: Int,
+        onComplete: () -> Unit = {},
+    ) = runtime.resizeAppSurface(external, appId, width, height, densityDpi, onComplete)
 
     fun rescaleOpenDisplays(external: Boolean, densityDpi: Int) =
         runtime.rescaleOpenDisplays(external, densityDpi)

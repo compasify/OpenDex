@@ -1,15 +1,18 @@
 package dev.opendex.platform
 
+import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
@@ -26,6 +29,8 @@ enum class NetworkKind { Wifi, Ethernet, Cellular, None }
 data class SystemStatus(
     val network: NetworkKind = NetworkKind.None,
     val wifiEnabled: Boolean = false,
+    val wifiSsid: String? = null,
+    val hasLocationPermission: Boolean = false,
     val bluetoothEnabled: Boolean = false,
     val batteryLevel: Int = -1,
     val batteryCharging: Boolean = false,
@@ -36,27 +41,76 @@ data class SystemStatus(
     val canWriteBrightness: Boolean = false,
 )
 
+internal fun cleanWifiSsid(raw: String?): String? {
+    val trimmed = raw?.trim()?.removePrefix("\"")?.removeSuffix("\"")?.trim().orEmpty()
+    if (trimmed.isEmpty()) return null
+    if (trimmed.equals("<unknown ssid>", ignoreCase = true)) return null
+    if (trimmed.equals("0x", ignoreCase = true)) return null
+    return trimmed
+}
+
 class SystemTrayController(context: Context) {
     private val appContext = context.applicationContext
     private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
     private val wifiManager = appContext.getSystemService(WifiManager::class.java)
     private val bluetoothManager = appContext.getSystemService(BluetoothManager::class.java)
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
+
+    @Volatile private var callbackWifiSsid: String? = null
     private val state = MutableStateFlow(readSnapshot())
     val status: StateFlow<SystemStatus> = state.asStateFlow()
 
     private var registered = false
     private var lastNonZeroVolume = 5
 
-    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) = refresh()
-        override fun onLost(network: Network) = refresh()
-        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = refresh()
-    }
+    private val networkCallback: ConnectivityManager.NetworkCallback = createNetworkCallback()
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             refresh()
+        }
+    }
+
+    private fun createNetworkCallback(): ConnectivityManager.NetworkCallback {
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO
+        } else {
+            0
+        }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            object : ConnectivityManager.NetworkCallback(flags) {
+                override fun onAvailable(network: Network) = refresh()
+                override fun onLost(network: Network) {
+                    callbackWifiSsid = null
+                    refresh()
+                }
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                    updateSsidFromCapabilities(caps)
+                    refresh()
+                }
+            }
+        } else {
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) = refresh()
+                override fun onLost(network: Network) {
+                    callbackWifiSsid = null
+                    refresh()
+                }
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                    refresh()
+                }
+            }
+        }
+    }
+
+    private fun updateSsidFromCapabilities(caps: NetworkCapabilities) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val info = caps.transportInfo as? WifiInfo
+            if (info != null) {
+                callbackWifiSsid = cleanWifiSsid(info.ssid)
+            } else if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                callbackWifiSsid = null
+            }
         }
     }
 
@@ -68,6 +122,8 @@ class SystemTrayController(context: Context) {
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
+            @Suppress("DEPRECATION")
+            addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
             addAction(AudioManager.RINGER_MODE_CHANGED_ACTION)
             addAction("android.media.VOLUME_CHANGED_ACTION")
@@ -86,6 +142,15 @@ class SystemTrayController(context: Context) {
 
     fun refresh() {
         state.value = readSnapshot()
+    }
+
+    /** Re-register network callback after location permission changes so Android delivers WifiInfo with SSID. */
+    fun onPermissionsChanged() {
+        if (registered) {
+            runCatching { connectivity?.unregisterNetworkCallback(networkCallback) }
+            runCatching { connectivity?.registerDefaultNetworkCallback(networkCallback) }
+        }
+        refresh()
     }
 
     fun setMediaVolume(level: Int) {
@@ -166,7 +231,28 @@ class SystemTrayController(context: Context) {
         return runCatching { context.startActivity(intent); true }.getOrDefault(false)
     }
 
+    private fun readWifiSsid(network: NetworkKind, hasLocationPermission: Boolean): String? {
+        if (network != NetworkKind.Wifi) return null
+        callbackWifiSsid?.let { return it }
+        if (!hasLocationPermission) return null
+        @Suppress("DEPRECATION")
+        val legacy = runCatching { cleanWifiSsid(wifiManager?.connectionInfo?.ssid) }.getOrNull()
+        if (legacy != null) return legacy
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val active = runCatching { connectivity?.activeNetwork }.getOrNull()
+            val caps = active?.let { runCatching { connectivity?.getNetworkCapabilities(it) }.getOrNull() }
+            val info = caps?.transportInfo as? WifiInfo
+            cleanWifiSsid(info?.ssid)?.let { return it }
+        }
+        return null
+    }
+
     private fun readSnapshot(): SystemStatus {
+        val hasLocation = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+
         val network = runCatching {
             val active = connectivity?.activeNetwork
             val caps = active?.let { connectivity.getNetworkCapabilities(it) }
@@ -180,6 +266,7 @@ class SystemTrayController(context: Context) {
         }.getOrDefault(NetworkKind.None)
 
         val wifiEnabled = runCatching { wifiManager?.isWifiEnabled == true }.getOrDefault(network == NetworkKind.Wifi)
+        val wifiSsid = readWifiSsid(network, hasLocation)
         val btEnabled = runCatching { bluetoothManager?.adapter?.isEnabled == true }.getOrDefault(false)
 
         val batteryIntent = runCatching {
@@ -208,6 +295,8 @@ class SystemTrayController(context: Context) {
         return SystemStatus(
             network = network,
             wifiEnabled = wifiEnabled,
+            wifiSsid = wifiSsid,
+            hasLocationPermission = hasLocation,
             bluetoothEnabled = btEnabled,
             batteryLevel = batteryPct,
             batteryCharging = charging,

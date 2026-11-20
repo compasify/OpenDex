@@ -43,6 +43,19 @@ fun Placement.boundsIn(floating: Bounds, area: Area): Bounds = when (this) {
         else Bounds(0f, 0f, area.width, area.height)
 }
 
+fun detectEdgeSnap(
+    pointerX: Float,
+    pointerY: Float,
+    area: Area,
+    edgeThresholdDp: Float = 24f,
+    topThresholdDp: Float = 16f,
+): Placement? = when {
+    area.canTile && pointerX <= edgeThresholdDp -> Placement.Left
+    area.canTile && pointerX >= area.width - edgeThresholdDp -> Placement.Right
+    pointerY <= topThresholdDp -> Placement.Full
+    else -> null
+}
+
 data class DesktopWindow(
     val tool: Tool,
     val floating: Bounds,
@@ -90,6 +103,12 @@ fun List<AppWindowState>.minimizeAllApps(): List<AppWindowState> = map {
     if (it.minimized) it else it.copy(minimized = true)
 }
 
+fun List<AppWindowState>.restoreApps(ids: Set<String>? = null): List<AppWindowState> = map {
+    if (!it.minimized) it
+    else if (ids == null || it.appId in ids) it.copy(minimized = false)
+    else it
+}
+
 fun List<AppWindowState>.encodeAppWindows(): String = joinToString("\n") {
     val b = it.floating
     listOf(it.appId, b.x, b.y, b.width, b.height, it.placement.name, it.minimized).joinToString("|")
@@ -127,6 +146,12 @@ fun List<DesktopWindow>.open(tool: Tool, area: Area): List<DesktopWindow> {
 
 fun List<DesktopWindow>.minimizeAllTools(): List<DesktopWindow> = map {
     if (it.minimized) it else it.copy(minimized = true)
+}
+
+fun List<DesktopWindow>.restoreTools(tools: Set<Tool>? = null): List<DesktopWindow> = map {
+    if (!it.minimized) it
+    else if (tools == null || it.tool in tools) it.copy(minimized = false)
+    else it
 }
 
 fun List<DesktopWindow>.activate(tool: Tool): List<DesktopWindow> {

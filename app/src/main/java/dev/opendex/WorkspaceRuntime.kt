@@ -13,6 +13,7 @@ import dev.opendex.desktop.activateApp
 import dev.opendex.desktop.decodeAppWindows
 import dev.opendex.desktop.minimizeAllApps
 import dev.opendex.desktop.openApp
+import dev.opendex.desktop.restoreApps
 import dev.opendex.platform.AdbWindows
 import dev.opendex.platform.InstalledApp
 import dev.opendex.platform.createAdbWindows
@@ -49,6 +50,7 @@ class WorkspaceRuntime private constructor(appContext: Context) {
     private val generationCounter = AtomicLong(0L)
     private val activeSurfaceGen = ConcurrentHashMap<String, Long>()
     private val lastSurfaceSize = ConcurrentHashMap<String, Pair<Int, Int>>()
+    private val pendingLaunchActions = ConcurrentHashMap<String, Pair<String, String?>>()
 
     private fun flowFor(external: Boolean): MutableStateFlow<List<AppWindowState>> =
         if (external) externalApps else localApps
@@ -98,6 +100,30 @@ class WorkspaceRuntime private constructor(appContext: Context) {
         persistAppWindows(external, updated)
     }
 
+    fun openAppWindowWithAction(external: Boolean, appId: String, action: String, area: Area, dataUri: String? = null) {
+        pendingLaunchActions[appId] = action to dataUri
+        val flow = flowFor(external)
+        val existingDisplayId = flow.value.firstOrNull { it.appId == appId }?.virtualDisplayId ?: NO_VIRTUAL_DISPLAY
+        val updated = flow.value.openApp(appId, area)
+        flow.value = updated
+        bringToFront(WindowKey.AppKey(appId))
+        persistAppWindows(external, updated)
+        if (existingDisplayId != NO_VIRTUAL_DISPLAY) {
+            scope.launch {
+                lockFor(appId).withLock {
+                    val pending = pendingLaunchActions.remove(appId) ?: return@withLock
+                    val liveDisplayId = flowFor(external).value.firstOrNull { it.appId == appId }?.virtualDisplayId
+                        ?: NO_VIRTUAL_DISPLAY
+                    if (liveDisplayId != NO_VIRTUAL_DISPLAY) {
+                        adbWindows.launchActionOnDisplay(pending.first, liveDisplayId, pending.second)
+                    } else {
+                        pendingLaunchActions[appId] = pending
+                    }
+                }
+            }
+        }
+    }
+
     fun activateAppWindow(external: Boolean, appId: String) {
         val flow = flowFor(external)
         val updated = flow.value.activateApp(appId)
@@ -134,6 +160,14 @@ class WorkspaceRuntime private constructor(appContext: Context) {
         persistAppWindows(external, updated)
     }
 
+    fun restoreAppWindows(external: Boolean, appIds: Set<String>? = null) {
+        val flow = flowFor(external)
+        val updated = flow.value.restoreApps(appIds)
+        if (updated == flow.value) return
+        flow.value = updated
+        persistAppWindows(external, updated)
+    }
+
     fun closeAppWindow(external: Boolean, appId: String) {
         val flow = flowFor(external)
         val removed = flow.value.firstOrNull { it.appId == appId } ?: return
@@ -142,6 +176,7 @@ class WorkspaceRuntime private constructor(appContext: Context) {
         zOrder.update { list -> list.filterNot { it == WindowKey.AppKey(appId) } }
         activeSurfaceGen.remove(appId)
         lastSurfaceSize.remove(appId)
+        pendingLaunchActions.remove(appId)
         persistAppWindows(external, updated)
         val displayId = removed.virtualDisplayId
         if (displayId != NO_VIRTUAL_DISPLAY) {
@@ -163,6 +198,7 @@ class WorkspaceRuntime private constructor(appContext: Context) {
         current.forEach {
             activeSurfaceGen.remove(it.appId)
             lastSurfaceSize.remove(it.appId)
+            pendingLaunchActions.remove(it.appId)
         }
         if (persist) persistAppWindows(external, emptyList())
         scope.launch {
@@ -199,6 +235,9 @@ class WorkspaceRuntime private constructor(appContext: Context) {
                     val reattached = adbWindows.setAppDisplaySurface(existingDisplayId, surface)
                     if (reattached) {
                         adbWindows.resizeAppDisplay(existingDisplayId, width, height, densityDpi)
+                        pendingLaunchActions.remove(app.id)?.let { (pendingAction, pendingDataUri) ->
+                            adbWindows.launchActionOnDisplay(pendingAction, existingDisplayId, pendingDataUri)
+                        }
                         updateAppWindow(external, app.id, persist = false) { it.copy(launching = false) }
                         return@withLock
                     }
@@ -221,7 +260,13 @@ class WorkspaceRuntime private constructor(appContext: Context) {
                 if (activeSurfaceGen[app.id] != gen) {
                     adbWindows.setAppDisplaySurface(createdId, null)
                 }
-                val launched = adbWindows.launchOnDisplay(app, createdId)
+                val pendingAction = pendingLaunchActions.remove(app.id)
+                val launched = if (pendingAction != null) {
+                    adbWindows.launchActionOnDisplay(pendingAction.first, createdId, pendingAction.second) ||
+                        adbWindows.launchOnDisplay(app, createdId)
+                } else {
+                    adbWindows.launchOnDisplay(app, createdId)
+                }
                 if (!launched || flow.value.none { it.appId == app.id }) {
                     closeAppWindow(external, app.id)
                     if (!launched) onFailure(app)
@@ -233,14 +278,25 @@ class WorkspaceRuntime private constructor(appContext: Context) {
         return gen
     }
 
-    fun resizeAppSurface(external: Boolean, appId: String, width: Int, height: Int, densityDpi: Int) {
+    fun resizeAppSurface(
+        external: Boolean,
+        appId: String,
+        width: Int,
+        height: Int,
+        densityDpi: Int,
+        onComplete: () -> Unit = {},
+    ) {
         lastSurfaceSize[appId] = width to height
         scope.launch {
-            lockFor(appId).withLock {
-                val displayId = flowFor(external).value.firstOrNull { it.appId == appId }?.virtualDisplayId
-                    ?: return@withLock
-                if (displayId == NO_VIRTUAL_DISPLAY) return@withLock
-                adbWindows.resizeAppDisplay(displayId, width, height, densityDpi)
+            try {
+                lockFor(appId).withLock {
+                    val displayId = flowFor(external).value.firstOrNull { it.appId == appId }?.virtualDisplayId
+                        ?: return@withLock
+                    if (displayId == NO_VIRTUAL_DISPLAY) return@withLock
+                    adbWindows.resizeAppDisplay(displayId, width, height, densityDpi)
+                }
+            } finally {
+                onComplete()
             }
         }
     }

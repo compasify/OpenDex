@@ -18,7 +18,8 @@ When an OEM already provides a desktop environment (Samsung DeX, Motorola Ready 
 4. **Support mouse + keyboard AND touch on every display.** Hover, right-click, scroll, and keyboard navigation (Tab/arrows/Enter/Esc) must work, with touch equivalents, no matter the display type.
 5. **Adapt to any display metrics.** Layout must handle arbitrary resolution, aspect ratio, and density of external/cast displays, and survive configuration changes (resize, rotation) without losing window state or user data.
 6. **Handle display connect/disconnect gracefully.** Plugging/unplugging a cable or starting/stopping a cast must never crash, lose pinned apps/notes, or unexpectedly launch apps on the wrong display. Persist workspace state and restore it on whichever display becomes active.
-7. **Verify on all three targets.** Follow the manual matrix in `docs/device-compatibility.md` (on-device + wired external) and extend it with Wi-Fi cast cases when testing display-related changes. A feature is not "supported" until it is observed working on the target display — don't infer success from a display merely being detected.
+7. **Open apps in OpenDex windows.** Any app or system screen launched from OpenDex should open inside an OpenDex window rather than fullscreen whenever windowed launch is available.
+8. **Verify on all three targets.** Follow the manual matrix in `docs/device-compatibility.md` (on-device + wired external) and extend it with Wi-Fi cast cases when testing display-related changes. A feature is not "supported" until it is observed working on the target display — don't infer success from a display merely being detected.
 
 ## Tech Stack
 

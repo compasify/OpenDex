@@ -54,13 +54,16 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.opendex.R
+import dev.opendex.data.DisplayScale
 import dev.opendex.data.DockAlignment
 import dev.opendex.data.DockSize
 import dev.opendex.data.DockStyle
 import dev.opendex.data.ThemeMode
 import dev.opendex.data.Wallpaper
+import dev.opendex.data.WindowResizeMode
 import dev.opendex.data.WindowScale
 import dev.opendex.data.WorkspacePreferences
+import dev.opendex.data.logicalResolution
 import dev.opendex.platform.AdbAccess
 import dev.opendex.platform.DesktopCapabilities
 import dev.opendex.ui.DesktopWallpaper
@@ -72,6 +75,7 @@ internal fun BoxScope.ToolWindow(
     window: DesktopWindow, area: Area, active: Boolean, onActivate: () -> Unit,
     onTransform: (Float, Float, Boolean) -> Unit, onTransformEnd: () -> Unit,
     onPlacement: (Placement) -> Unit, onMinimize: () -> Unit, onClose: () -> Unit,
+    onSnapPreview: ((Bounds?) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     WindowFrame(
@@ -94,6 +98,7 @@ internal fun BoxScope.ToolWindow(
         onPlacement = onPlacement,
         onMinimize = onMinimize,
         onClose = onClose,
+        onSnapPreview = onSnapPreview,
         reserveResizeFooter = true,
     ) { content() }
 }
@@ -113,6 +118,7 @@ internal fun BoxScope.WindowFrame(
     onPlacement: (Placement) -> Unit,
     onMinimize: () -> Unit,
     onClose: () -> Unit,
+    onSnapPreview: ((Bounds?) -> Unit)? = null,
     reserveResizeFooter: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -126,10 +132,17 @@ internal fun BoxScope.WindowFrame(
     var menu by remember { mutableStateOf(false) }
     var windowHasFocus by remember { mutableStateOf(false) }
     var pointerActivated by remember { mutableStateOf(false) }
+    var pendingSnap by remember { mutableStateOf<Placement?>(null) }
     val isActive by rememberUpdatedState(active)
     val activate by rememberUpdatedState(onActivate)
     val transform by rememberUpdatedState(onTransform)
     val finish by rememberUpdatedState(onTransformEnd)
+    val latestBounds by rememberUpdatedState(bounds)
+    val latestPlacement by rememberUpdatedState(onPlacement)
+    val latestSnapPreview by rememberUpdatedState(onSnapPreview)
+    DisposableEffect(Unit) {
+        onDispose { latestSnapPreview?.invoke(null) }
+    }
     LaunchedEffect(active) {
         if (active) {
             // Let pointer targets (including the note field or hosted app view) handle their own focus.
@@ -138,9 +151,33 @@ internal fun BoxScope.WindowFrame(
         }
     }
     fun Modifier.windowDrag(resize: Boolean) = pointerInput(area, density, resize) {
-        detectDragGestures(onDragEnd = { finish() }, onDragCancel = { finish() }) { change, delta ->
+        detectDragGestures(
+            onDragEnd = {
+                val snap = if (!resize) pendingSnap else null
+                pendingSnap = null
+                if (!resize) latestSnapPreview?.invoke(null)
+                finish()
+                if (snap != null) latestPlacement(snap)
+            },
+            onDragCancel = {
+                pendingSnap = null
+                if (!resize) latestSnapPreview?.invoke(null)
+                finish()
+            },
+        ) { change, delta ->
             change.consume()
-            with(density) { transform(delta.x.toDp().value, delta.y.toDp().value, resize) }
+            with(density) {
+                transform(delta.x.toDp().value, delta.y.toDp().value, resize)
+                if (!resize) {
+                    val pointerX = latestBounds.x + change.position.x.toDp().value
+                    val pointerY = latestBounds.y + change.position.y.toDp().value
+                    val snap = detectEdgeSnap(pointerX, pointerY, area)
+                    if (snap != pendingSnap) {
+                        pendingSnap = snap
+                        latestSnapPreview?.invoke(snap?.boundsIn(latestBounds, area))
+                    }
+                }
+            }
         }
     }
     val isFloating = placement == Placement.Floating
@@ -379,13 +416,18 @@ internal fun SettingsPanel(
     caps: DesktopCapabilities,
     widthDp: Int,
     heightDp: Int,
+    physicalWidthPx: Int,
+    physicalHeightPx: Int,
+    nativeDensity: Float,
     densityDpi: Int,
+    displayScale: DisplayScale,
     adbAccess: AdbAccess,
     openAppCount: Int,
     onAdbPermission: () -> Unit,
     onTheme: (ThemeMode) -> Unit,
     onWallpaper: (Wallpaper) -> Unit,
     onPickWallpaper: () -> Unit,
+    onDisplayScale: (DisplayScale) -> Unit,
     onDock: (DockStyle) -> Unit,
     onDockSize: (DockSize) -> Unit,
     onDockAlignment: (DockAlignment) -> Unit,
@@ -393,6 +435,7 @@ internal fun SettingsPanel(
     onShowSystemTray: (Boolean) -> Unit,
     onShowDesktopShortcuts: (Boolean) -> Unit,
     onWindowScale: (WindowScale) -> Unit,
+    onWindowResizeMode: (WindowResizeMode) -> Unit,
     onRestoreOpenApps: (Boolean) -> Unit,
     onCloseAllApps: () -> Unit,
     onHome: () -> Unit,
@@ -404,6 +447,19 @@ internal fun SettingsPanel(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        SettingsCard(title = R.string.display_resolution_title) {
+            DisplayScalePicker(
+                current = displayScale,
+                externalDisplay = caps.external,
+                displayId = caps.currentDisplay,
+                physicalWidthPx = physicalWidthPx,
+                physicalHeightPx = physicalHeightPx,
+                nativeDensity = nativeDensity,
+                onSelect = onDisplayScale,
+            )
+            ChoiceChipRow(R.string.window_scale, WindowScale.entries, preferences.windowScale, WindowScale::label, onWindowScale)
+        }
+
         SettingsCard(title = R.string.appearance) {
             ChoiceChipRow(R.string.theme, ThemeMode.entries, preferences.theme, ThemeMode::label, onTheme)
             WallpaperPicker(
@@ -413,7 +469,6 @@ internal fun SettingsPanel(
                 onWallpaper = onWallpaper,
                 onPickWallpaper = onPickWallpaper,
             )
-            ChoiceChipRow(R.string.window_scale, WindowScale.entries, preferences.windowScale, WindowScale::label, onWindowScale)
             SettingsSwitchRow(
                 title = stringResource(R.string.show_desktop_shortcuts),
                 checked = preferences.showDesktopShortcuts,
@@ -438,6 +493,7 @@ internal fun SettingsPanel(
         }
 
         SettingsCard(title = R.string.app_windows_section) {
+            ChoiceChipRow(R.string.window_resize_mode, WindowResizeMode.entries, preferences.windowResizeMode, WindowResizeMode::label, onWindowResizeMode)
             SettingsSwitchRow(
                 title = stringResource(R.string.restore_open_apps),
                 subtitle = stringResource(R.string.restore_open_apps_desc),
@@ -641,6 +697,156 @@ private fun WallpaperSwatch(
             color = if (selected) colors.primary else colors.onSurfaceVariant,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         )
+    }
+}
+
+@Composable
+private fun DisplayScalePicker(
+    current: DisplayScale,
+    externalDisplay: Boolean,
+    displayId: Int,
+    physicalWidthPx: Int,
+    physicalHeightPx: Int,
+    nativeDensity: Float,
+    onSelect: (DisplayScale) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val hasPhysical = physicalWidthPx > 0 && physicalHeightPx > 0
+    val (currentW, currentH) = if (hasPhysical) {
+        logicalResolution(physicalWidthPx, physicalHeightPx, nativeDensity, current)
+    } else 0 to 0
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            if (hasPhysical) {
+                Text(
+                    stringResource(
+                        R.string.display_resolution_summary,
+                        currentW,
+                        currentH,
+                        current.percent,
+                        physicalWidthPx,
+                        physicalHeightPx,
+                    ),
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = colors.secondaryContainer.copy(alpha = 0.7f),
+            ) {
+                Text(
+                    if (externalDisplay) stringResource(R.string.tray_display_external, displayId)
+                    else stringResource(R.string.tray_display_builtin),
+                    Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSecondaryContainer,
+                )
+            }
+        }
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            DisplayScale.entries.forEach { option ->
+                val selected = option == current
+                val interactions = remember { MutableInteractionSource() }
+                val hovered by interactions.collectIsHoveredAsState()
+                val focused by interactions.collectIsFocusedAsState()
+                val (optW, optH) = if (hasPhysical) {
+                    logicalResolution(physicalWidthPx, physicalHeightPx, nativeDensity, option)
+                } else 0 to 0
+                val shape = RoundedCornerShape(12.dp)
+                val cardBg = when {
+                    selected -> colors.primary.copy(alpha = 0.14f)
+                    hovered || focused -> colors.surfaceContainerHighest
+                    else -> colors.surfaceContainerLow
+                }
+                val labelText = stringResource(option.label)
+                Column(
+                    Modifier.width(86.dp)
+                        .clip(shape)
+                        .background(cardBg)
+                        .border(
+                            width = if (selected || focused) 2.dp else 1.dp,
+                            color = if (selected || focused) colors.primary else colors.outlineVariant.copy(alpha = 0.55f),
+                            shape = shape,
+                        )
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .clickable(
+                            interactionSource = interactions,
+                            indication = LocalIndication.current,
+                            role = Role.RadioButton,
+                            onClickLabel = "$labelText ${option.percent}%",
+                            onClick = { onSelect(option) },
+                        )
+                        .padding(horizontal = 6.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    // Stylized macOS-like miniature display preview scaled to represent UI density.
+                    val windowFraction = (0.36f + option.scaleFactor * 0.34f).coerceIn(0.54f, 0.84f)
+                    val dockHeight = (3.5f + option.scaleFactor * 3f).dp
+                    Box(
+                        Modifier.fillMaxWidth()
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(colors.surfaceContainerHighest)
+                            .border(0.75.dp, colors.outlineVariant.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                            .padding(3.dp),
+                    ) {
+                        Box(
+                            Modifier.align(Alignment.TopStart)
+                                .fillMaxWidth(windowFraction)
+                                .fillMaxHeight(windowFraction)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(if (selected) colors.primary.copy(alpha = 0.25f) else colors.surfaceContainer)
+                                .border(0.75.dp, if (selected) colors.primary else colors.outlineVariant, RoundedCornerShape(3.dp)),
+                        ) {
+                            Box(
+                                Modifier.fillMaxWidth()
+                                    .height((3.5f * option.scaleFactor).dp)
+                                    .background(if (selected) colors.primary.copy(alpha = 0.6f) else colors.outlineVariant.copy(alpha = 0.7f)),
+                            )
+                        }
+                        Box(
+                            Modifier.align(Alignment.BottomCenter)
+                                .fillMaxWidth(0.72f)
+                                .height(dockHeight)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(if (selected) colors.primary.copy(alpha = 0.85f) else colors.onSurfaceVariant.copy(alpha = 0.45f)),
+                        )
+                    }
+                    Text(
+                        "${option.percent}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (selected) colors.primary else colors.onSurface,
+                    )
+                    if (hasPhysical) {
+                        Text(
+                            "${optW}×${optH}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                    Text(
+                        labelText,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                        color = if (selected) colors.primary else colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
     }
 }
 
