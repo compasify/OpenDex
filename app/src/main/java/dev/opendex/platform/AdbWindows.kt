@@ -20,8 +20,9 @@ interface AdbWindows : AutoCloseable {
     suspend fun launchActionOnDisplay(action: String, displayId: Int, dataUri: String? = null): Boolean = false
     suspend fun resizeAppDisplay(displayId: Int, width: Int, height: Int, densityDpi: Int): Boolean = false
     suspend fun setAppDisplaySurface(displayId: Int, surface: Surface?): Boolean = false
-    fun injectMotion(displayId: Int, event: MotionEvent) = Unit
-    fun injectKey(displayId: Int, event: KeyEvent) = Unit
+    suspend fun ensureConnected(): Boolean = false
+    fun injectMotion(displayId: Int, event: MotionEvent): Boolean = false
+    fun injectKey(displayId: Int, event: KeyEvent): Boolean = false
     suspend fun releaseAppDisplay(displayId: Int) = Unit
     suspend fun releaseAllAppDisplays() = Unit
 }

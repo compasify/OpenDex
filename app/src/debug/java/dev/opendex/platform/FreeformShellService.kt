@@ -173,7 +173,7 @@ class FreeformShellService(private val context: Context) : Binder() {
                 val displayId = data.readInt()
                 val event = MotionEvent.CREATOR.createFromParcel(data)
                 val ok = try {
-                    displays.containsKey(displayId) && injectInputEvent(displayId, event)
+                    isAllowedInputDisplay(displayId) && injectInputEvent(displayId, event)
                 } finally {
                     event.recycle()
                 }
@@ -183,7 +183,7 @@ class FreeformShellService(private val context: Context) : Binder() {
             INJECT_KEY -> {
                 val displayId = data.readInt()
                 val event = KeyEvent.CREATOR.createFromParcel(data)
-                val ok = displays.containsKey(displayId) && injectInputEvent(displayId, event)
+                val ok = isAllowedInputDisplay(displayId) && injectInputEvent(displayId, event)
                 reply.writeNoException()
                 reply.writeInt(if (ok) 1 else 0)
             }
@@ -447,6 +447,13 @@ class FreeformShellService(private val context: Context) : Binder() {
         }
         Log.w("OpenDex", "No InputManager injector available")
         return null
+    }
+
+    private fun isAllowedInputDisplay(displayId: Int): Boolean {
+        if (displays.containsKey(displayId)) return true
+        if (displayId == Display.DEFAULT_DISPLAY || displayId == Display.INVALID_DISPLAY) return false
+        val dm = shellContext.getSystemService(DisplayManager::class.java) ?: return false
+        return dm.getDisplay(displayId)?.isValid == true
     }
 
     private fun injectInputEvent(displayId: Int, event: InputEvent): Boolean {

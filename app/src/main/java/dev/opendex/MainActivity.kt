@@ -7,7 +7,9 @@ import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
@@ -33,6 +35,7 @@ import dev.opendex.desktop.AppWindowState
 import dev.opendex.desktop.Area
 import dev.opendex.desktop.Desktop
 import dev.opendex.desktop.DesktopWindow
+import dev.opendex.desktop.ExternalInputController
 import dev.opendex.desktop.WindowKey
 import dev.opendex.platform.AdbWindows
 import dev.opendex.platform.AndroidDesktop
@@ -164,10 +167,18 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        model.externalInput.unregisterExternalHost(this)
         systemTray.stop()
         window.decorView.viewTreeObserver.removeOnGlobalLayoutListener(windowLayoutListener)
         desktop.displayManager.unregisterDisplayListener(displayListener)
         super.onStop()
+    }
+
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        if (capabilities.external && ev.deviceId > 0 && ev.isFromSource(InputDevice.SOURCE_MOUSE)) {
+            model.externalInput.onNativeExternalMouseEvent()
+        }
+        return super.dispatchGenericMotionEvent(ev)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -186,13 +197,30 @@ class MainActivity : ComponentActivity() {
         controller.hide(WindowInsetsCompat.Type.systemBars())
     }
 
-    private fun refresh() { if (::desktop.isInitialized) capabilities = desktop.inspect() }
+    private fun refresh() {
+        if (::desktop.isInitialized) {
+            val next = desktop.inspect()
+            capabilities = next
+            if (::model.isInitialized) {
+                if (next.external) {
+                    val decor = window?.decorView
+                    val screen = next.screens.firstOrNull { it.id == next.currentDisplay }
+                    val w = decor?.width?.takeIf { it > 0 } ?: screen?.width ?: 0
+                    val h = decor?.height?.takeIf { it > 0 } ?: screen?.height ?: 0
+                    model.externalInput.registerExternalHost(this, next.currentDisplay, w, h)
+                } else {
+                    model.externalInput.unregisterExternalHost(this)
+                }
+            }
+        }
+    }
 }
 
 class WorkspaceModel(application: Application) : AndroidViewModel(application) {
     private val runtime = WorkspaceRuntime.get(application)
     private val storage = runtime.storage
     val adbWindows: AdbWindows = runtime.adbWindows
+    val externalInput: ExternalInputController = runtime.externalInput
     val windowOrder: StateFlow<List<WindowKey>> = runtime.windowOrder
 
     private val readFailure = MutableStateFlow(false)

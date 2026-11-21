@@ -46,7 +46,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
         .tag("opendex-freeform-${Process.myUid()}")
         .processNameSuffix("freeform_shell")
         .daemon(false)
-        .version(5)
+        .version(6)
 
     private val binderReceived = Shizuku.OnBinderReceivedListener { refresh() }
     private val binderDead = Shizuku.OnBinderDeadListener {
@@ -240,11 +240,13 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
             read = { reply -> reply.readInt() == 1 },
         )
 
-    override fun injectMotion(displayId: Int, event: MotionEvent) {
-        if (closed || displayId == Display.INVALID_DISPLAY) return
-        val binder = activeBinder?.takeIf { it.isBinderAlive } ?: return
+    override suspend fun ensureConnected(): Boolean = ensureBinder() != null
+
+    override fun injectMotion(displayId: Int, event: MotionEvent): Boolean {
+        if (closed || displayId == Display.INVALID_DISPLAY) return false
+        val binder = activeBinder?.takeIf { it.isBinderAlive } ?: return false
         val copy = MotionEvent.obtain(event)
-        try {
+        return try {
             inputExecutor.execute {
                 val data = Parcel.obtain()
                 val reply = Parcel.obtain()
@@ -264,16 +266,18 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
                     copy.recycle()
                 }
             }
+            true
         } catch (_: RuntimeException) {
             copy.recycle()
+            false
         }
     }
 
-    override fun injectKey(displayId: Int, event: KeyEvent) {
-        if (closed || displayId == Display.INVALID_DISPLAY) return
-        val binder = activeBinder?.takeIf { it.isBinderAlive } ?: return
+    override fun injectKey(displayId: Int, event: KeyEvent): Boolean {
+        if (closed || displayId == Display.INVALID_DISPLAY) return false
+        val binder = activeBinder?.takeIf { it.isBinderAlive } ?: return false
         val copy = KeyEvent(event)
-        runCatching {
+        return runCatching {
             inputExecutor.execute {
                 val data = Parcel.obtain()
                 val reply = Parcel.obtain()
@@ -292,7 +296,8 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
                     data.recycle()
                 }
             }
-        }
+            true
+        }.getOrDefault(false)
     }
 
     override suspend fun releaseAppDisplay(displayId: Int) {

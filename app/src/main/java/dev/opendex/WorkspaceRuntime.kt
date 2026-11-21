@@ -7,6 +7,7 @@ import android.view.Surface
 import dev.opendex.data.WorkspaceStore
 import dev.opendex.desktop.AppWindowState
 import dev.opendex.desktop.Area
+import dev.opendex.desktop.ExternalInputController
 import dev.opendex.desktop.NO_VIRTUAL_DISPLAY
 import dev.opendex.desktop.WindowKey
 import dev.opendex.desktop.activateApp
@@ -40,6 +41,7 @@ class WorkspaceRuntime private constructor(appContext: Context) {
     val adbWindows: AdbWindows = createAdbWindows(appContext)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    val externalInput = ExternalInputController(adbWindows, scope)
     private val localApps = MutableStateFlow<List<AppWindowState>>(emptyList())
     private val externalApps = MutableStateFlow<List<AppWindowState>>(emptyList())
     private val zOrder = MutableStateFlow<List<WindowKey>>(emptyList())

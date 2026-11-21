@@ -93,6 +93,7 @@ internal fun Dock(
     onToggleDesktopApp: ((InstalledApp) -> Unit)? = null,
     onAppInfo: ((InstalledApp) -> Unit)? = null,
     onUninstallApp: ((InstalledApp) -> Unit)? = null,
+    onOpenTouchpad: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val byId = remember(apps) { apps.associateBy { it.id } }
@@ -244,6 +245,16 @@ internal fun Dock(
                         }
                     } else if (!floating) {
                         Spacer(Modifier.weight(1f))
+                    }
+
+                    if (onOpenTouchpad != null) {
+                        DockDivider(dockSize.heightDp)
+                        ToolButton(
+                            icon = Icons.Default.TouchApp,
+                            label = stringResource(R.string.open_touchpad_mode),
+                            onClick = onOpenTouchpad,
+                            size = buttonDp,
+                        )
                     }
 
                     if (totalOpenCount > 0) {

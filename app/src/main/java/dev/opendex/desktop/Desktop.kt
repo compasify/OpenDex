@@ -129,6 +129,28 @@ fun Desktop(
     }
     val context = LocalContext.current
     val external = caps.external
+    val externalScreens = remember(caps.screens) {
+        caps.screens.filterNot { it.id == Display.DEFAULT_DISPLAY }
+    }
+    var touchpadTargetDisplayId by rememberSaveable { mutableStateOf<Int?>(null) }
+    val activeTouchpadScreen = remember(external, touchpadTargetDisplayId, externalScreens) {
+        if (external) null else externalScreens.firstOrNull { it.id == touchpadTargetDisplayId }
+    }
+    LaunchedEffect(external, touchpadTargetDisplayId, activeTouchpadScreen) {
+        if (!external && touchpadTargetDisplayId != null && activeTouchpadScreen == null) {
+            touchpadTargetDisplayId = null
+            model.externalInput.hidePointer()
+        }
+    }
+    if (activeTouchpadScreen != null) {
+        ExternalTouchpadScreen(
+            screen = activeTouchpadScreen,
+            controller = model.externalInput,
+            onExit = { touchpadTargetDisplayId = null },
+        )
+        return
+    }
+    val externalPointer by model.externalInput.pointerState.collectAsStateWithLifecycle()
     // Seed each instance from the saved layout, then keep its open tools independent.
     val layoutIsExternal = rememberSaveable { external }
     var serialized by rememberSaveable {
@@ -446,7 +468,12 @@ fun Desktop(
     Box(
         Modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .onSizeChanged { physicalSizePx = it },
+            .onSizeChanged {
+                physicalSizePx = it
+                if (external && it.width > 0 && it.height > 0) {
+                    model.externalInput.updateExternalSize(caps.currentDisplay, it.width, it.height)
+                }
+            },
     ) {
         CompositionLocalProvider(LocalDensity provides effectiveDensity) {
         DesktopWallpaper(
@@ -681,11 +708,18 @@ fun Desktop(
                                                     if (!changeHome()) notice = Notice(R.string.home_settings_unavailable)
                                                 },
                                                 onScreen = { id ->
-                                                    notice = when (platform.openWorkspaceOn(id)) {
+                                                    val result = platform.openWorkspaceOn(id)
+                                                    notice = when (result) {
                                                         LaunchResult.Requested -> null
                                                         LaunchResult.DisplayDisconnected -> Notice(R.string.display_disconnected)
                                                         LaunchResult.DisplayRejected, LaunchResult.Unavailable -> Notice(R.string.workspace_display_rejected)
                                                     }
+                                                    if (result == LaunchResult.Requested && !external) {
+                                                        touchpadTargetDisplayId = id
+                                                    }
+                                                },
+                                                onTouchpad = { id ->
+                                                    if (!external) touchpadTargetDisplayId = id
                                                 },
                                             )
                                         }
@@ -963,12 +997,21 @@ fun Desktop(
                 onToggleDesktopApp = { app -> model.save { toggleDesktopApp(app.id) } },
                 onAppInfo = openAppInfo,
                 onUninstallApp = uninstallApp,
+                onOpenTouchpad = if (!external && externalScreens.isNotEmpty()) {
+                    { touchpadTargetDisplayId = externalScreens.first().id }
+                } else null,
                 onTool = { tool ->
                     // Compute geometry inside the desktop, where the dock and insets are excluded.
                     pendingTool = tool
                 },
             )
         }
+        }
+        if (external) {
+            ExternalCursorOverlay(
+                pointer = externalPointer,
+                currentDisplayId = caps.currentDisplay,
+            )
         }
     }
 }
