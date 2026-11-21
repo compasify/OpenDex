@@ -52,6 +52,7 @@ class ExternalInputController(
     @Volatile private var targetHeightPx: Int = 1080
     @Volatile private var primaryDownTime: Long = 0L
     @Volatile private var primaryPressed: Boolean = false
+    @Volatile private var lastHoverDispatchMs: Long = 0L
 
     fun registerExternalHost(activity: Activity, displayId: Int, widthPx: Int, heightPx: Int) {
         if (displayId == Display.DEFAULT_DISPLAY || displayId == Display.INVALID_DISPLAY) return
@@ -151,7 +152,8 @@ class ExternalInputController(
                 pressure = 1f,
                 isGeneric = false,
             )
-        } else {
+        } else if (now - lastHoverDispatchMs >= HOVER_DISPATCH_INTERVAL_MS) {
+            lastHoverDispatchMs = now
             dispatchMotion(
                 displayId = displayId,
                 downTime = now,
@@ -407,4 +409,8 @@ class ExternalInputController(
 
     private fun maxX(): Float = (targetWidthPx - 1).coerceAtLeast(0).toFloat()
     private fun maxY(): Float = (targetHeightPx - 1).coerceAtLeast(0).toFloat()
+
+    companion object {
+        private const val HOVER_DISPATCH_INTERVAL_MS = 16L
+    }
 }

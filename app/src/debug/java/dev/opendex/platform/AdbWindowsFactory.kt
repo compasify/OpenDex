@@ -16,6 +16,7 @@ import android.view.MotionEvent
 import android.view.Surface
 import androidx.compose.ui.unit.IntRect
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +39,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
     private val inputExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "opendex-input-inject").apply { isDaemon = true }
     }
+    private val pendingMove = AtomicReference<Pair<Int, MotionEvent>?>(null)
     @Volatile private var activeBinder: IBinder? = null
     @Volatile private var activeConnection: ServiceConnection? = null
     @Volatile private var closed = false
@@ -246,30 +248,59 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
         if (closed || displayId == Display.INVALID_DISPLAY) return false
         val binder = activeBinder?.takeIf { it.isBinderAlive } ?: return false
         val copy = MotionEvent.obtain(event)
+        val isCoalesceable = copy.actionMasked == MotionEvent.ACTION_HOVER_MOVE ||
+            copy.actionMasked == MotionEvent.ACTION_MOVE
+        if (isCoalesceable) {
+            val prev = pendingMove.getAndSet(displayId to copy)
+            prev?.second?.recycle()
+            if (prev != null) return true
+            return try {
+                inputExecutor.execute {
+                    val latest = pendingMove.getAndSet(null) ?: return@execute
+                    transactMotion(binder, latest.first, latest.second)
+                }
+                true
+            } catch (_: RuntimeException) {
+                pendingMove.getAndSet(null)?.second?.recycle()
+                false
+            }
+        }
         return try {
             inputExecutor.execute {
-                val data = Parcel.obtain()
-                val reply = Parcel.obtain()
-                try {
-                    data.writeInterfaceToken(FREEFORM_DESCRIPTOR)
-                    data.writeInt(displayId)
-                    copy.writeToParcel(data, 0)
-                    binder.transact(INJECT_MOTION, data, reply, 0)
-                    reply.readException()
-                } catch (_: RemoteException) {
-                    activeBinder = null
-                } catch (_: RuntimeException) {
-                    // Ignore transient injection errors during teardown.
-                } finally {
-                    reply.recycle()
-                    data.recycle()
-                    copy.recycle()
+                // Flush any pending drag move before DOWN/UP so clicks/releases land at exact latest coordinates.
+                pendingMove.getAndSet(null)?.let { (pendingDisplayId, pendingEvent) ->
+                    if (pendingEvent.actionMasked == MotionEvent.ACTION_MOVE) {
+                        transactMotion(binder, pendingDisplayId, pendingEvent)
+                    } else {
+                        pendingEvent.recycle()
+                    }
                 }
+                transactMotion(binder, displayId, copy)
             }
             true
         } catch (_: RuntimeException) {
             copy.recycle()
             false
+        }
+    }
+
+    private fun transactMotion(binder: IBinder, displayId: Int, event: MotionEvent) {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        try {
+            data.writeInterfaceToken(FREEFORM_DESCRIPTOR)
+            data.writeInt(displayId)
+            event.writeToParcel(data, 0)
+            binder.transact(INJECT_MOTION, data, reply, 0)
+            reply.readException()
+        } catch (_: RemoteException) {
+            activeBinder = null
+        } catch (_: RuntimeException) {
+            // Ignore transient injection errors during teardown.
+        } finally {
+            reply.recycle()
+            data.recycle()
+            event.recycle()
         }
     }
 

@@ -183,6 +183,7 @@
     <string name="touchpad_exit">Thoát chế độ bàn di</string>
     <string name="touchpad_left_click">Nhấp trái</string>
     <string name="touchpad_right_click">Nhấp phải</string>
+    <string name="touchpad_pointer_speed">Tốc độ chuột / DPI</string>
     <plurals name="result_count">
         <item quantity="one">%1$d kết quả</item>
         <item quantity="other">%1$d kết quả</item>

@@ -5,6 +5,7 @@ import androidx.annotation.StringRes
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dev.opendex.R
@@ -131,6 +132,7 @@ data class WorkspacePreferences(
     val windowScale: WindowScale = WindowScale.Standard,
     val windowResizeMode: WindowResizeMode = WindowResizeMode.Live,
     val restoreOpenApps: Boolean = true,
+    val pointerSpeed: Float = 1.2f,
     val localWindows: String = "",
     val externalWindows: String = "",
     val localAppWindows: String = "",
@@ -159,6 +161,7 @@ class WorkspaceStore(context: Context) {
     private val windowScale = stringPreferencesKey("window_scale")
     private val windowResizeMode = stringPreferencesKey("window_resize_mode")
     private val restoreOpenApps = booleanPreferencesKey("restore_open_apps")
+    private val pointerSpeed = floatPreferencesKey("pointer_speed")
     private val localWindows = stringPreferencesKey("local_windows")
     private val externalWindows = stringPreferencesKey("external_windows")
     private val localAppWindows = stringPreferencesKey("local_app_windows")
@@ -189,6 +192,7 @@ class WorkspaceStore(context: Context) {
             windowScale = WindowScale.entries.find { it.name == p[windowScale] } ?: WindowScale.Standard,
             windowResizeMode = WindowResizeMode.entries.find { it.name == p[windowResizeMode] } ?: WindowResizeMode.Live,
             restoreOpenApps = p[restoreOpenApps] ?: true,
+            pointerSpeed = (p[pointerSpeed] ?: 1.2f).coerceIn(0.4f, 3.0f),
             localWindows = p[localWindows].orEmpty(),
             externalWindows = p[externalWindows].orEmpty(),
             localAppWindows = p[localAppWindows].orEmpty(),
@@ -223,6 +227,7 @@ class WorkspaceStore(context: Context) {
     suspend fun windowScale(value: WindowScale) = store.edit { it[windowScale] = value.name }
     suspend fun windowResizeMode(value: WindowResizeMode) = store.edit { it[windowResizeMode] = value.name }
     suspend fun restoreOpenApps(value: Boolean) = store.edit { it[restoreOpenApps] = value }
+    suspend fun pointerSpeed(value: Float) = store.edit { it[pointerSpeed] = value.coerceIn(0.4f, 3.0f) }
 
     suspend fun updateWindows(external: Boolean, update: (List<DesktopWindow>) -> List<DesktopWindow>) = store.edit {
         val key = if (external) externalWindows else localWindows

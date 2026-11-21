@@ -185,6 +185,7 @@
     <string name="touchpad_exit">Exit touchpad mode</string>
     <string name="touchpad_left_click">Left click</string>
     <string name="touchpad_right_click">Right click</string>
+    <string name="touchpad_pointer_speed">Pointer speed / DPI</string>
     <plurals name="result_count">
         <item quantity="one">%1$d result</item>
         <item quantity="other">%1$d results</item>

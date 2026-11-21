@@ -40,7 +40,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -48,17 +50,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.opendex.R
 import dev.opendex.platform.ScreenInfo
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.StateFlow
 
-private val POINTER_SPEEDS = floatArrayOf(0.8f, 1.2f, 1.6f, 2.2f)
+private val SPEED_PRESETS = floatArrayOf(0.6f, 1.0f, 1.5f, 2.2f)
 
 private fun hasExternalMouseConnected(): Boolean =
     InputDevice.getDeviceIds().any { id ->
@@ -70,13 +73,14 @@ private fun hasExternalMouseConnected(): Boolean =
 internal fun ExternalTouchpadScreen(
     screen: ScreenInfo,
     controller: ExternalInputController,
+    pointerSpeed: Float,
+    onPointerSpeedChange: (Float) -> Unit,
     onExit: () -> Unit,
 ) {
-    val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
 
-    var speedIndex by remember { mutableIntStateOf(1) }
-    val sensitivity = POINTER_SPEEDS[speedIndex]
+    var liveSpeed by remember(pointerSpeed) { mutableFloatStateOf(pointerSpeed.coerceIn(0.4f, 3.0f)) }
+    var speedMenuOpen by remember { mutableStateOf(false) }
     var keyboardOpen by remember { mutableStateOf(false) }
     var pointerCaptured by remember { mutableStateOf(false) }
     var mouseDetected by remember { mutableStateOf(hasExternalMouseConnected()) }
@@ -200,12 +204,67 @@ internal fun ExternalTouchpadScreen(
                     )
                 }
 
-                // Speed cycle
-                OutlinedButton(
-                    onClick = { speedIndex = (speedIndex + 1) % POINTER_SPEEDS.size },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                ) {
-                    Text("${sensitivity}×", style = MaterialTheme.typography.labelMedium)
+                // Speed / DPI popover button
+                Box {
+                    OutlinedButton(
+                        onClick = { speedMenuOpen = true },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    ) {
+                        Icon(Icons.Default.Speed, null, Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("${(liveSpeed * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium)
+                    }
+                    DropdownMenu(
+                        expanded = speedMenuOpen,
+                        onDismissRequest = { speedMenuOpen = false },
+                    ) {
+                        Column(
+                            Modifier
+                                .width(236.dp)
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    stringResource(R.string.touchpad_pointer_speed),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    "${(liveSpeed * 100).roundToInt()}%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.primary,
+                                )
+                            }
+                            Slider(
+                                value = liveSpeed,
+                                onValueChange = { liveSpeed = it },
+                                onValueChangeFinished = { onPointerSpeedChange(liveSpeed) },
+                                valueRange = 0.4f..3.0f,
+                            )
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                SPEED_PRESETS.forEach { preset ->
+                                    val selected = abs(liveSpeed - preset) < 0.08f
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = {
+                                            liveSpeed = preset
+                                            onPointerSpeedChange(preset)
+                                        },
+                                        label = { Text("${preset}×", style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 IconButton(
@@ -288,7 +347,7 @@ internal fun ExternalTouchpadScreen(
                         context = ctx,
                         dotColorArgb = dotColor,
                         controller = controller,
-                        getSensitivity = { POINTER_SPEEDS[speedIndex] },
+                        initialSensitivity = liveSpeed,
                         onInteracted = { hasInteracted = true },
                         onPointerCaptureChanged = { captured -> pointerCaptured = captured },
                         onMouseSeen = { mouseDetected = true },
@@ -296,7 +355,7 @@ internal fun ExternalTouchpadScreen(
                 },
                 update = { view ->
                     view.setDotColor(dotColor)
-                    view.setSensitivity(sensitivity)
+                    view.setSensitivity(liveSpeed)
                 },
             )
 
@@ -529,21 +588,37 @@ private fun QuickKeyChip(label: String, onClick: () -> Unit) {
 
 /**
  * Crisp desktop arrow cursor rendered in physical pixel coordinates on the external display.
+ * Uses graphicsLayer translation so moving the cursor causes zero Compose recompositions or
+ * layout passes on the external desktop.
  */
 @Composable
 internal fun BoxScope.ExternalCursorOverlay(
-    pointer: ExternalPointerState,
+    pointerState: StateFlow<ExternalPointerState>,
     currentDisplayId: Int,
 ) {
-    if (!pointer.visible || pointer.targetDisplayId != currentDisplayId) return
-    val scale = if (pointer.pressed) 0.90f else 1.0f
+    val pointer = pointerState.collectAsStateWithLifecycle()
+    val visible by remember(currentDisplayId) {
+        derivedStateOf {
+            val p = pointer.value
+            p.visible && p.targetDisplayId == currentDisplayId
+        }
+    }
+    if (!visible) return
     Canvas(
         Modifier
             .align(AbsoluteAlignment.TopLeft)
-            .absoluteOffset { IntOffset(pointer.x.roundToInt(), pointer.y.roundToInt()) }
-            .size(28.dp),
+            .size(28.dp)
+            .graphicsLayer {
+                val p = pointer.value
+                translationX = p.x
+                translationY = p.y
+                val s = if (p.pressed) 0.90f else 1.0f
+                scaleX = s
+                scaleY = s
+                transformOrigin = TransformOrigin(0f, 0f)
+            },
     ) {
-        val s = size.minDimension / 24f * scale
+        val s = size.minDimension / 24f
         val shadowPath = Path().apply {
             moveTo(1.5f * s, 2.2f * s)
             lineTo(1.5f * s, 19.2f * s)
@@ -586,13 +661,13 @@ private class ExternalTouchpadView(
     context: Context,
     dotColorArgb: Int,
     private val controller: ExternalInputController,
-    private val getSensitivity: () -> Float,
+    initialSensitivity: Float,
     private val onInteracted: () -> Unit,
     private val onPointerCaptureChanged: (Boolean) -> Unit,
     private val onMouseSeen: () -> Unit,
 ) : View(context) {
 
-    private var sensitivity: Float = getSensitivity()
+    private var sensitivity: Float = initialSensitivity
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     private val dotSpacingPx = 28f * resources.displayMetrics.density
     private val dotRadiusPx = 1.4f * resources.displayMetrics.density
@@ -661,8 +736,17 @@ private class ExternalTouchpadView(
         onInteracted()
         when (event.actionMasked) {
             MotionEvent.ACTION_MOVE -> {
-                val dx = event.x * sensitivity
-                val dy = event.y * sensitivity
+                // Sum all batched hardware mouse reports so high-polling-rate mice never drop deltas.
+                var rawDx = 0f
+                var rawDy = 0f
+                for (i in 0 until event.historySize) {
+                    rawDx += event.getHistoricalX(i)
+                    rawDy += event.getHistoricalY(i)
+                }
+                rawDx += event.x
+                rawDy += event.y
+                val dx = rawDx * sensitivity
+                val dy = rawDy * sensitivity
                 if (dx != 0f || dy != 0f) {
                     controller.moveBy(dx, dy)
                 }
@@ -793,9 +877,14 @@ private class ExternalTouchpadView(
                     val dy = event.y - lastY
                     lastX = event.x
                     lastY = event.y
-                    totalMove += hypot(dx.toDouble(), dy.toDouble()).toFloat()
+                    val step = hypot(dx.toDouble(), dy.toDouble()).toFloat()
+                    totalMove += step
                     if (dx != 0f || dy != 0f) {
-                        controller.moveBy(dx * sensitivity, dy * sensitivity)
+                        // Gentle acceleration on fast finger swipes while keeping slow movements precise.
+                        val dpStep = step / resources.displayMetrics.density.coerceAtLeast(1f)
+                        val accel = 1f + (dpStep / 14f).coerceAtMost(1.35f)
+                        val gain = sensitivity * accel
+                        controller.moveBy(dx * gain, dy * gain)
                     }
                 }
             }

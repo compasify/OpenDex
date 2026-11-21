@@ -146,11 +146,12 @@ fun Desktop(
         ExternalTouchpadScreen(
             screen = activeTouchpadScreen,
             controller = model.externalInput,
+            pointerSpeed = preferences.pointerSpeed,
+            onPointerSpeedChange = { speed -> model.save { pointerSpeed(speed) } },
             onExit = { touchpadTargetDisplayId = null },
         )
         return
     }
-    val externalPointer by model.externalInput.pointerState.collectAsStateWithLifecycle()
     // Seed each instance from the saved layout, then keep its open tools independent.
     val layoutIsExternal = rememberSaveable { external }
     var serialized by rememberSaveable {
@@ -1009,7 +1010,7 @@ fun Desktop(
         }
         if (external) {
             ExternalCursorOverlay(
-                pointer = externalPointer,
+                pointerState = model.externalInput.pointerState,
                 currentDisplayId = caps.currentDisplay,
             )
         }
