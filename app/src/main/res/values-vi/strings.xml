@@ -41,7 +41,7 @@
     <string name="launch_primary_rejected">Không mở được ứng dụng trên màn hình chính.</string>
     <string name="launch_app_unavailable">Không mở được %1$s. Ứng dụng có thể đã bị gỡ hoặc bị giới hạn.</string>
     <string name="open_on_primary">Mở trên màn hình chính</string>
-    <string name="workspace_display_rejected">Không mở được OpenDex trên màn hình đó. Nếu thiết bị có chế độ máy tính, hãy mở OpenDex từ danh sách ứng dụng trên màn hình ngoài.</string>
+    <string name="workspace_display_rejected">Không mở được OpenDex trên màn hình đó. Nếu chế độ máy tính của hãng (như Samsung DeX) đang chặn, hãy mở OpenDex từ danh sách ứng dụng trên màn hình ngoài hoặc chuyển HDMI sang chế độ phản chiếu màn hình.</string>
     <string name="home_settings_unavailable">Không mở được phần cài đặt màn hình chính trên thiết bị này.</string>
     <string name="save_error">Không lưu được không gian làm việc. Hãy kiểm tra bộ nhớ thiết bị rồi thử lại.</string>
     <string name="read_error">Không tải được cài đặt không gian làm việc. OpenDex đang thử lại.</string>
@@ -63,9 +63,9 @@
     <string name="dock">Thanh ứng dụng</string>
     <string name="dock_style">Kiểu dáng</string>
     <string name="dock_size">Kích thước</string>
-    <string name="dock_size_compact">Gọn</string>
-    <string name="dock_size_medium">Vừa</string>
+    <string name="dock_size_small">Nhỏ</string>
     <string name="dock_size_large">Lớn</string>
+    <string name="dock_size_reset">Mặc định</string>
     <string name="dock_alignment">Căn lề</string>
     <string name="dock_align_center">Giữa</string>
     <string name="dock_align_start">Trái</string>
@@ -165,8 +165,9 @@
     <string name="reported_features_notice">Thông tin trên không xác nhận ứng dụng sẽ mở ở đâu hay ở chế độ cửa sổ nào. Android và phần mềm của thiết bị quản lý các ứng dụng bên ngoài.</string>
     <string name="display_details">#%1$d · %2$s · %3$d × %4$d px</string>
     <string name="test_display">Mở OpenDex trên màn hình #%1$d</string>
+    <string name="opening_external_display">Đang mở trên màn hình #%1$d…</string>
     <string name="disconnect_external_display">Ngắt kết nối</string>
-    <string name="dex_tip">Nếu màn hình ngoài có phiên máy tính riêng, bạn cũng có thể mở OpenDex từ danh sách ứng dụng hệ thống trên màn hình đó.</string>
+    <string name="dex_tip">Nếu màn hình ngoài có chế độ máy tính riêng (như Samsung DeX), bạn có thể mở OpenDex trực tiếp từ đây hoặc từ danh sách ứng dụng trên màn hình đó.</string>
     <string name="external_displays">Màn hình ngoài</string>
     <string name="no_external_display">Android chưa nhận diện màn hình riêng. Nếu hệ thống chỉ phản chiếu, OpenDex dùng cùng cửa sổ như trên màn hình chính.</string>
     <string name="display_current">OpenDex đang chạy trên màn hình này.</string>

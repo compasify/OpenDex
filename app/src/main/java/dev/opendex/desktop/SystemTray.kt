@@ -99,13 +99,14 @@ internal fun SystemTrayCluster(
     expandedIcons: Boolean,
     selected: Boolean,
     height: Dp,
+    iconSize: Dp = 16.dp,
     onClick: () -> Unit,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val hovered by interactions.collectIsHoveredAsState()
     val focused by interactions.collectIsFocusedAsState()
     val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(if (height <= 32.dp) 7.dp else 10.dp)
     val label = stringResource(R.string.quick_settings)
     val fill = when {
         selected -> colors.secondaryContainer
@@ -119,22 +120,22 @@ internal fun SystemTrayCluster(
             .then(if (focused) Modifier.border(1.5.dp, colors.primary, shape) else Modifier)
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable(interactions, LocalIndication.current, role = Role.Button, onClickLabel = label, onClick = onClick)
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = if (height <= 32.dp) 6.dp else 8.dp)
             .semantics { contentDescription = label },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (height <= 32.dp) 5.dp else 7.dp),
     ) {
         Icon(
             imageVector = networkIcon(status.network),
             contentDescription = null,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(iconSize),
             tint = if (status.network != NetworkKind.None) colors.onSurface else colors.onSurfaceVariant,
         )
         if (expandedIcons || status.bluetoothEnabled) {
             Icon(
                 imageVector = if (status.bluetoothEnabled) Icons.Default.Bluetooth else Icons.Default.BluetoothDisabled,
                 contentDescription = null,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(iconSize),
                 tint = if (status.bluetoothEnabled) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.6f),
             )
         }
@@ -142,7 +143,7 @@ internal fun SystemTrayCluster(
             Icon(
                 imageVector = volumeIcon(status),
                 contentDescription = null,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(iconSize),
                 tint = if (status.muted) colors.onSurfaceVariant else colors.onSurface,
             )
         }
@@ -154,7 +155,7 @@ internal fun SystemTrayCluster(
                 Icon(
                     imageVector = batteryIcon(status.batteryLevel, status.batteryCharging),
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(iconSize),
                     tint = when {
                         status.batteryCharging -> colors.primary
                         status.batteryLevel <= 15 -> colors.error
@@ -164,7 +165,7 @@ internal fun SystemTrayCluster(
                 if (expandedIcons) {
                     Text(
                         "${status.batteryLevel}%",
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = if (height <= 32.dp) 10.sp else 11.sp),
                         color = colors.onSurface,
                         fontWeight = FontWeight.Medium,
                     )
@@ -179,13 +180,14 @@ internal fun NotificationTrayButton(
     count: Int,
     selected: Boolean,
     size: Dp,
+    iconSize: Dp = if (size <= 40.dp) 18.dp else 20.dp,
     onClick: () -> Unit,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val hovered by interactions.collectIsHoveredAsState()
     val focused by interactions.collectIsFocusedAsState()
     val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(if (size <= 32.dp) 7.dp else 10.dp)
     val label = if (count > 0) pluralStringResource(R.plurals.notifications_count, count, count)
         else stringResource(R.string.notifications)
     val fill = when {
@@ -206,14 +208,20 @@ internal fun NotificationTrayButton(
         Icon(
             imageVector = if (count > 0) Icons.Default.Notifications else Icons.Default.NotificationsNone,
             contentDescription = null,
-            modifier = Modifier.size(if (size <= 40.dp) 18.dp else 20.dp),
+            modifier = Modifier.size(iconSize),
             tint = if (count > 0 || selected) colors.primary else colors.onSurface,
         )
         if (count > 0) {
+            val badgePadding = when {
+                size <= 32.dp -> 1.dp
+                size <= 40.dp -> 3.dp
+                else -> 5.dp
+            }
+            val badgeMin = if (size <= 32.dp) 12.dp else 14.dp
             Box(
                 Modifier.align(Alignment.TopEnd)
-                    .padding(top = 5.dp, end = 5.dp)
-                    .sizeIn(minWidth = 14.dp, minHeight = 14.dp)
+                    .padding(top = badgePadding, end = badgePadding)
+                    .sizeIn(minWidth = badgeMin, minHeight = badgeMin)
                     .clip(CircleShape)
                     .background(colors.primary)
                     .padding(horizontal = 3.dp),

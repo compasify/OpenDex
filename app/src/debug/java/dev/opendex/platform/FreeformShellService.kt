@@ -20,6 +20,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
 import androidx.compose.ui.unit.IntRect
+import dev.opendex.ExternalDisplayActivity
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.FutureTask
@@ -40,6 +41,7 @@ internal const val RELEASE_DISPLAY = Binder.FIRST_CALL_TRANSACTION + 7
 internal const val RELEASE_ALL_DISPLAYS = Binder.FIRST_CALL_TRANSACTION + 8
 internal const val LAUNCH_ACTION_ON_DISPLAY = Binder.FIRST_CALL_TRANSACTION + 9
 internal const val SET_SUPPRESS_IME = Binder.FIRST_CALL_TRANSACTION + 10
+internal const val LAUNCH_EXTERNAL_WORKSPACE = Binder.FIRST_CALL_TRANSACTION + 11
 private const val DESTROY_USER_SERVICE = 16777115
 private const val PER_ANDROID_USER_UID_RANGE = 100_000
 
@@ -128,7 +130,7 @@ class FreeformShellService(private val context: Context) : Binder() {
             releaseAllDisplays()
             exitProcess(0)
         }
-        if (code !in OPEN_FREEFORM..SET_SUPPRESS_IME || reply == null) {
+        if (code !in OPEN_FREEFORM..LAUNCH_EXTERNAL_WORKSPACE || reply == null) {
             return super.onTransact(code, data, reply, flags)
         }
         if (caller != ownerUid || Process.myUid() != SHELL_UID) throw SecurityException("Unexpected caller or backend")
@@ -228,6 +230,24 @@ class FreeformShellService(private val context: Context) : Binder() {
                 }
                 reply.writeNoException()
                 reply.writeInt(1)
+            }
+            LAUNCH_EXTERNAL_WORKSPACE -> {
+                val displayId = data.readInt()
+                val validDisplay = displayId != Display.DEFAULT_DISPLAY &&
+                    displayId != Display.INVALID_DISPLAY &&
+                    !displays.containsKey(displayId) &&
+                    shellContext.getSystemService(DisplayManager::class.java)?.getDisplay(displayId)?.isValid == true
+                val ok = validDisplay && runAm(
+                    "start", "-W",
+                    "--user", userId.toString(),
+                    "--display", displayId.toString(),
+                    "--windowingMode", "1",
+                    "-f", "0x10000000",
+                    "-n", "${context.packageName}/${ExternalDisplayActivity::class.java.name}",
+                    "--ei", ExternalDisplayActivity.EXTRA_TARGET_DISPLAY_ID, displayId.toString(),
+                ) != null
+                reply.writeNoException()
+                reply.writeInt(if (ok) 1 else 0)
             }
         }
         return true

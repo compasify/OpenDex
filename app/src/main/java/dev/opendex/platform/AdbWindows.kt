@@ -22,6 +22,7 @@ interface AdbWindows : AutoCloseable {
     suspend fun setAppDisplaySurface(displayId: Int, surface: Surface?): Boolean = false
     suspend fun ensureConnected(): Boolean = false
     suspend fun setSuppressExternalIme(externalDisplayId: Int, suppress: Boolean) = Unit
+    suspend fun launchExternalWorkspace(displayId: Int): Boolean = false
     fun injectMotion(displayId: Int, event: MotionEvent): Boolean = false
     fun injectKey(displayId: Int, event: KeyEvent): Boolean = false
     suspend fun releaseAppDisplay(displayId: Int) = Unit

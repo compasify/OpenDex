@@ -42,7 +42,7 @@
     <string name="launch_primary_rejected">Could not open on the main display.</string>
     <string name="launch_app_unavailable">Could not open %1$s. The app may have been removed or restricted.</string>
     <string name="open_on_primary">Open on the main display</string>
-    <string name="workspace_display_rejected">Could not open OpenDex on that display. If you have a desktop session there, open OpenDex from its app drawer.</string>
+    <string name="workspace_display_rejected">Could not open OpenDex on that display. If an OEM desktop (such as Samsung DeX) is blocking it, either open OpenDex from that desktop’s app drawer or switch HDMI to screen mirroring.</string>
     <string name="home_settings_unavailable">Could not open Home settings on this device.</string>
     <string name="save_error">Could not save the workspace. Check device storage and try again.</string>
     <string name="read_error">Could not load workspace settings. OpenDex is retrying.</string>
@@ -64,9 +64,10 @@
     <string name="dock">Dock</string>
     <string name="dock_style">Style</string>
     <string name="dock_size">Size</string>
-    <string name="dock_size_compact">Compact</string>
-    <string name="dock_size_medium">Medium</string>
+    <string name="dock_size_small">Small</string>
     <string name="dock_size_large">Large</string>
+    <string name="dock_size_reset">Reset</string>
+    <string name="dock_size_value" translatable="false">%1$d dp</string>
     <string name="dock_alignment">Alignment</string>
     <string name="dock_align_center">Center</string>
     <string name="dock_align_start">Left</string>
@@ -167,8 +168,9 @@
     <string name="reported_features_notice">Reported features do not confirm app placement or window mode. Android and the device software manage other apps.</string>
     <string name="display_details">#%1$d · %2$s · %3$d × %4$d px</string>
     <string name="test_display">Open OpenDex on display #%1$d</string>
+    <string name="opening_external_display">Opening on display #%1$d…</string>
     <string name="disconnect_external_display">Disconnect</string>
-    <string name="dex_tip">If the external display has its own desktop, you can also open OpenDex from its system app launcher.</string>
+    <string name="dex_tip">If the external display has its own desktop (such as Samsung DeX), you can open OpenDex directly from here or from that desktop’s app drawer.</string>
     <string name="external_displays">External displays</string>
     <string name="no_external_display">Android hasn’t reported a separate display. If the system is only mirroring, OpenDex uses the same window as on the main display.</string>
     <string name="display_current">OpenDex is running on this display.</string>

@@ -18,9 +18,57 @@ import android.provider.Settings
 import android.view.Display
 import android.view.WindowInsets
 import androidx.compose.ui.unit.IntRect
-import dev.opendex.MainActivity
+import dev.opendex.ExternalDisplayActivity
 import java.text.Collator
 import java.util.Locale
+
+internal fun isOwnHostedVirtualDisplay(name: String?): Boolean =
+    name != null && name.startsWith("OpenDex-")
+
+internal fun isDisplayActive(state: Int): Boolean = state != Display.STATE_OFF
+
+internal fun isSystemDesktopDisplay(name: String?): Boolean =
+    name.equals("Desktop", ignoreCase = true)
+
+/**
+ * When an OEM desktop environment (such as Samsung DeX Dual Mode) creates an active virtual
+ * "Desktop" display that takes over physical HDMI scanout, the underlying HDMI presentation
+ * display remains in DisplayManager with a separate, unrendered layerStack. Hide those shadowed
+ * presentation displays while the active "Desktop" display is online so users target the display
+ * that is actually visible on the TV/monitor.
+ */
+internal fun filterShadowedExternalDisplays(screens: List<ScreenInfo>, currentDisplay: Int): List<ScreenInfo> {
+    val hasActiveSystemDesktop = screens.any {
+        it.id != Display.DEFAULT_DISPLAY && isSystemDesktopDisplay(it.name)
+    }
+    if (!hasActiveSystemDesktop) return screens
+    return screens.filterNot {
+        it.id != Display.DEFAULT_DISPLAY && it.id != currentDisplay && !isSystemDesktopDisplay(it.name) && it.canPresent
+    }
+}
+
+enum class ExternalLaunchMethod { Activity, ShellActivity, Presentation }
+
+enum class ExternalLaunchOutcome { Opened, DisplayDisconnected, Rejected }
+
+internal fun isMisplacedExternalLaunch(actualDisplayId: Int, expectedDisplayId: Int): Boolean =
+    actualDisplayId == Display.DEFAULT_DISPLAY ||
+        (expectedDisplayId != Display.INVALID_DISPLAY && actualDisplayId != expectedDisplayId)
+
+internal fun resolveExternalLaunchOrder(
+    canLaunchActivity: Boolean,
+    canPresent: Boolean,
+    adbGranted: Boolean,
+): List<ExternalLaunchMethod> = when {
+    canLaunchActivity -> buildList {
+        add(ExternalLaunchMethod.Activity)
+        if (adbGranted) add(ExternalLaunchMethod.ShellActivity)
+        add(ExternalLaunchMethod.Presentation)
+    }
+    canPresent -> listOf(ExternalLaunchMethod.Presentation)
+    adbGranted -> listOf(ExternalLaunchMethod.ShellActivity)
+    else -> emptyList()
+}
 
 data class InstalledApp(
     val component: ComponentName,
@@ -50,8 +98,13 @@ fun Context.installedApps(): List<InstalledApp> {
 }
 
 data class ScreenInfo(
-    val id: Int, val name: String, val width: Int, val height: Int,
+    val id: Int,
+    val name: String,
+    val width: Int,
+    val height: Int,
     val canOpenWorkspace: Boolean,
+    val canLaunchActivity: Boolean = canOpenWorkspace,
+    val canPresent: Boolean = false,
 )
 data class DesktopCapabilities(
     val currentDisplay: Int = Display.DEFAULT_DISPLAY,
@@ -65,17 +118,23 @@ data class DesktopCapabilities(
 
 enum class LaunchResult { Requested, DisplayDisconnected, DisplayRejected, Unavailable }
 
-class AndroidDesktop(private val activity: Activity) {
+class AndroidDesktop(private val activity: Activity, private val fixedDisplayId: Int? = null) {
     val displayManager: DisplayManager = activity.getSystemService(DisplayManager::class.java)
     private val activityManager = activity.getSystemService(ActivityManager::class.java)
     private val roles = activity.getSystemService(RoleManager::class.java)
 
     @Suppress("DEPRECATION") // Activity.display was added in API 30.
     fun currentDisplayId(): Int =
-        (if (Build.VERSION.SDK_INT >= 30) activity.display else activity.windowManager.defaultDisplay)
-            ?.displayId ?: Display.DEFAULT_DISPLAY
+        fixedDisplayId
+            ?: (if (Build.VERSION.SDK_INT >= 30) activity.display else activity.windowManager.defaultDisplay)
+                ?.displayId
+            ?: Display.DEFAULT_DISPLAY
+
+    fun findDisplay(displayId: Int): Display? =
+        displayManager.getDisplay(displayId)?.takeIf { it.isValid && isDisplayActive(it.state) }
 
     fun boundsAboveDock(dockHeightPx: Int): IntRect? {
+        if (fixedDisplayId != null) return null
         if (Build.VERSION.SDK_INT < 30 || dockHeightPx <= 0 || activity.isInMultiWindowMode) return null
         val metrics = activity.windowManager.currentWindowMetrics
         if (metrics.bounds != activity.windowManager.maximumWindowMetrics.bounds) return null
@@ -92,14 +151,31 @@ class AndroidDesktop(private val activity: Activity) {
 
     fun inspect(): DesktopCapabilities {
         val current = currentDisplayId()
+        val presentationIds = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+            .mapTo(HashSet()) { it.displayId }
+        val activeScreens = displayManager.displays.filter {
+            it.isValid && isDisplayActive(it.state) && !isOwnHostedVirtualDisplay(it.name)
+        }.map {
+            val id = it.displayId
+            val canActivity = id != Display.DEFAULT_DISPLAY && id != current && supportsDisplayTargeting &&
+                isStartAllowed(id, externalWorkspaceIntent(id))
+            val canPresent = id != Display.DEFAULT_DISPLAY && id != current &&
+                (id in presentationIds || (it.flags and Display.FLAG_PRESENTATION) != 0)
+            val isDesktopTarget = id != Display.DEFAULT_DISPLAY && id != current &&
+                isSystemDesktopDisplay(it.name)
+            ScreenInfo(
+                id = id,
+                name = it.name,
+                width = it.mode.physicalWidth,
+                height = it.mode.physicalHeight,
+                canOpenWorkspace = canActivity || canPresent || isDesktopTarget,
+                canLaunchActivity = canActivity,
+                canPresent = canPresent || isDesktopTarget,
+            )
+        }
         return DesktopCapabilities(
             currentDisplay = current,
-            screens = displayManager.displays.filter { it.isValid }.map {
-                val id = it.displayId
-                val canOpen = id != Display.DEFAULT_DISPLAY && id != current && supportsDisplayTargeting &&
-                    isStartAllowed(id, workspaceIntent())
-                ScreenInfo(id, it.name, it.mode.physicalWidth, it.mode.physicalHeight, canOpen)
-            },
+            screens = filterShadowedExternalDisplays(activeScreens, current),
             secondaryActivities = supportsDisplayTargeting,
             freeform = activity.packageManager.hasSystemFeature(PackageManager.FEATURE_FREEFORM_WINDOW_MANAGEMENT),
             home = roles.isRoleAvailable(RoleManager.ROLE_HOME) && roles.isRoleHeld(RoleManager.ROLE_HOME),
@@ -122,10 +198,11 @@ class AndroidDesktop(private val activity: Activity) {
         displayId,
     )
 
-    fun openWorkspaceOn(displayId: Int): LaunchResult = launch(workspaceIntent(), displayId)
+    fun openWorkspaceOn(displayId: Int): LaunchResult = launch(externalWorkspaceIntent(displayId), displayId)
 
-    private fun workspaceIntent(): Intent =
-        Intent(activity, MainActivity::class.java)
+    private fun externalWorkspaceIntent(displayId: Int): Intent =
+        Intent(activity, ExternalDisplayActivity::class.java)
+            .putExtra(ExternalDisplayActivity.EXTRA_TARGET_DISPLAY_ID, displayId)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
 
     fun homeIntent(): Intent = if (roles.isRoleAvailable(RoleManager.ROLE_HOME) && !roles.isRoleHeld(RoleManager.ROLE_HOME)) {

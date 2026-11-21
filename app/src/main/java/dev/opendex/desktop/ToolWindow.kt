@@ -57,13 +57,15 @@ import androidx.compose.ui.unit.sp
 import dev.opendex.R
 import dev.opendex.data.DisplayScale
 import dev.opendex.data.DockAlignment
-import dev.opendex.data.DockSize
 import dev.opendex.data.DockStyle
+import dev.opendex.data.MAX_DOCK_HEIGHT_DP
+import dev.opendex.data.MIN_DOCK_HEIGHT_DP
 import dev.opendex.data.ThemeMode
 import dev.opendex.data.Wallpaper
 import dev.opendex.data.WindowResizeMode
 import dev.opendex.data.WindowScale
 import dev.opendex.data.WorkspacePreferences
+import dev.opendex.data.defaultDockHeightDp
 import dev.opendex.data.logicalResolution
 import dev.opendex.platform.AdbAccess
 import dev.opendex.platform.DesktopCapabilities
@@ -525,7 +527,9 @@ internal fun SettingsPanel(
     onPickWallpaper: () -> Unit,
     onDisplayScale: (DisplayScale) -> Unit,
     onDock: (DockStyle) -> Unit,
-    onDockSize: (DockSize) -> Unit,
+    dockHeightDp: Int,
+    onDockHeightPreview: (Int) -> Unit,
+    onDockHeightCommit: (Int) -> Unit,
     onDockAlignment: (DockAlignment) -> Unit,
     onShowClock: (Boolean) -> Unit,
     onShowSystemTray: (Boolean) -> Unit,
@@ -539,6 +543,7 @@ internal fun SettingsPanel(
     onTouchpad: (Int) -> Unit = {},
     activeExternalDisplayId: Int = Display.INVALID_DISPLAY,
     onDisconnectExternal: (Int) -> Unit = {},
+    launchingDisplayId: Int? = null,
 ) {
     val secondary = MaterialTheme.colorScheme.onSurfaceVariant
     val dark = isThemeDark(preferences.theme)
@@ -577,7 +582,13 @@ internal fun SettingsPanel(
 
         SettingsCard(title = R.string.dock) {
             ChoiceChipRow(R.string.dock_style, DockStyle.entries, preferences.dock, DockStyle::label, onDock)
-            ChoiceChipRow(R.string.dock_size, DockSize.entries, preferences.dockSize, DockSize::label, onDockSize)
+            DockHeightSlider(
+                dockHeightDp = dockHeightDp,
+                externalDisplay = caps.external,
+                displayId = caps.currentDisplay,
+                onPreview = onDockHeightPreview,
+                onCommit = onDockHeightCommit,
+            )
             ChoiceChipRow(R.string.dock_alignment, DockAlignment.entries, preferences.dockAlignment, DockAlignment::label, onDockAlignment)
             SettingsSwitchRow(
                 title = stringResource(R.string.show_system_tray),
@@ -643,7 +654,7 @@ internal fun SettingsPanel(
         }
 
         SettingsCard(title = R.string.external_displays) {
-            ConnectedDisplays(caps, onScreen, onTouchpad, activeExternalDisplayId, onDisconnectExternal)
+            ConnectedDisplays(caps, onScreen, onTouchpad, activeExternalDisplayId, onDisconnectExternal, launchingDisplayId)
         }
     }
 }
@@ -800,6 +811,108 @@ private fun WallpaperSwatch(
 }
 
 @Composable
+private fun DockHeightSlider(
+    dockHeightDp: Int,
+    externalDisplay: Boolean,
+    displayId: Int,
+    onPreview: (Int) -> Unit,
+    onCommit: (Int) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val defaultHeight = defaultDockHeightDp(externalDisplay)
+    var sliderValue by remember { mutableFloatStateOf(dockHeightDp.toFloat()) }
+    LaunchedEffect(dockHeightDp) {
+        if (sliderValue.roundToInt() != dockHeightDp) {
+            sliderValue = dockHeightDp.toFloat()
+        }
+    }
+    val liveHeight = sliderValue.roundToInt().coerceIn(MIN_DOCK_HEIGHT_DP, MAX_DOCK_HEIGHT_DP)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.dock_size),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.onSurfaceVariant,
+                )
+                Text(
+                    stringResource(R.string.dock_size_value, liveHeight),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.primary,
+                )
+            }
+            if (liveHeight != defaultHeight) {
+                TextButton(
+                    onClick = {
+                        sliderValue = defaultHeight.toFloat()
+                        onCommit(defaultHeight)
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(26.dp),
+                ) {
+                    Text(stringResource(R.string.dock_size_reset), style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            DisplayTargetBadge(externalDisplay = externalDisplay, displayId = displayId)
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                stringResource(R.string.dock_size_small),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+            )
+            Slider(
+                value = sliderValue,
+                onValueChange = {
+                    sliderValue = it
+                    onPreview(it.roundToInt())
+                },
+                onValueChangeFinished = {
+                    onCommit(sliderValue.roundToInt())
+                },
+                valueRange = MIN_DOCK_HEIGHT_DP.toFloat()..MAX_DOCK_HEIGHT_DP.toFloat(),
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                stringResource(R.string.dock_size_large),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DisplayTargetBadge(externalDisplay: Boolean, displayId: Int) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = colors.secondaryContainer.copy(alpha = 0.7f),
+    ) {
+        Text(
+            if (externalDisplay) stringResource(R.string.tray_display_external, displayId)
+            else stringResource(R.string.tray_display_builtin),
+            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.onSecondaryContainer,
+        )
+    }
+}
+
+@Composable
 private fun DisplayScalePicker(
     current: DisplayScale,
     externalDisplay: Boolean,
@@ -836,18 +949,7 @@ private fun DisplayScalePicker(
                     color = colors.onSurfaceVariant,
                 )
             }
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = colors.secondaryContainer.copy(alpha = 0.7f),
-            ) {
-                Text(
-                    if (externalDisplay) stringResource(R.string.tray_display_external, displayId)
-                    else stringResource(R.string.tray_display_builtin),
-                    Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.onSecondaryContainer,
-                )
-            }
+            DisplayTargetBadge(externalDisplay = externalDisplay, displayId = displayId)
         }
         Row(
             Modifier.horizontalScroll(rememberScrollState()),
@@ -995,6 +1097,7 @@ internal fun ConnectedDisplays(
     onTouchpad: (Int) -> Unit = {},
     activeExternalDisplayId: Int = Display.INVALID_DISPLAY,
     onDisconnectExternal: (Int) -> Unit = {},
+    launchingDisplayId: Int? = null,
 ) {
     val colors = MaterialTheme.colorScheme
     val secondary = colors.onSurfaceVariant
@@ -1012,8 +1115,18 @@ internal fun ConnectedDisplays(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (!runningOnScreen && screen.canOpenWorkspace) {
-                OutlinedButton(onClick = { onScreen(screen.id) }) {
-                    Text(stringResource(R.string.test_display, screen.id))
+                val launching = launchingDisplayId == screen.id
+                OutlinedButton(
+                    onClick = { onScreen(screen.id) },
+                    enabled = launchingDisplayId == null,
+                ) {
+                    if (launching) {
+                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.opening_external_display, screen.id))
+                    } else {
+                        Text(stringResource(R.string.test_display, screen.id))
+                    }
                 }
             }
             if (!caps.external) {

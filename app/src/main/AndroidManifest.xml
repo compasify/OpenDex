@@ -20,11 +20,31 @@
          android:supportsRtl="true" android:resizeableActivity="true">
         <property android:name="android.window.PROPERTY_SUPPORTS_MULTI_INSTANCE_SYSTEM_UI"
             android:value="true" />
-        <activity android:name=".MainActivity" android:exported="true">
+        <meta-data android:name="com.samsung.android.multidisplay.keep_process_alive" android:value="true" />
+        <meta-data android:name="com.samsung.android.keepalive.density" android:value="true" />
+        <meta-data android:name="com.samsung.android.sdk.multiwindow.multiinstance.enable" android:value="true" />
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboard|keyboardHidden|navigation">
+            <meta-data android:name="com.samsung.android.dex.launchwidth" android:value="0" />
+            <meta-data android:name="com.samsung.android.dex.launchheight" android:value="0" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+        <activity
+            android:name=".ExternalDisplayActivity"
+            android:exported="true"
+            android:taskAffinity="dev.opendex.external"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboard|keyboardHidden|navigation">
+            <meta-data android:name="com.samsung.android.dex.launchwidth" android:value="0" />
+            <meta-data android:name="com.samsung.android.dex.launchheight" android:value="0" />
         </activity>
         <activity-alias android:name=".DesktopHome" android:targetActivity=".MainActivity"
             android:exported="true">

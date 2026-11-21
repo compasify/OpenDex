@@ -62,10 +62,12 @@ import dev.opendex.platform.AdbAccess
 import dev.opendex.platform.AdbWindows
 import dev.opendex.platform.AndroidDesktop
 import dev.opendex.platform.DesktopCapabilities
+import dev.opendex.platform.ExternalLaunchOutcome
 import dev.opendex.platform.InstalledApp
 import dev.opendex.platform.LaunchResult
 import dev.opendex.platform.NotificationBanner
 import dev.opendex.platform.NotificationCenterStore
+import dev.opendex.platform.ScreenInfo
 import dev.opendex.platform.SystemStatus
 import dev.opendex.platform.SystemTrayController
 import dev.opendex.platform.TrayNotification
@@ -122,6 +124,7 @@ fun Desktop(
     onKeepScreenOn: (Boolean) -> Unit = {},
     onDimScreen: (Boolean) -> Unit = {},
     onMoveToBackground: () -> Unit = {},
+    onOpenExternalDisplay: (suspend (ScreenInfo) -> ExternalLaunchOutcome)? = null,
     changeHome: () -> Boolean,
 ) {
     if (preferences == null) {
@@ -261,6 +264,7 @@ fun Desktop(
     var pendingSettingsLaunch by remember { mutableStateOf<Triple<InstalledApp, String, String?>?>(null) }
     var notice by remember { mutableStateOf<Notice?>(null) }
     var sendingFreeform by remember { mutableStateOf(false) }
+    var launchingExternalDisplayId by remember { mutableStateOf<Int?>(null) }
     var dockHeightPx by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     var recent by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
@@ -281,6 +285,12 @@ fun Desktop(
     LaunchedEffect(hostedDensityDpi, layoutIsExternal) {
         model.rescaleOpenDisplays(layoutIsExternal, hostedDensityDpi)
     }
+    val savedDockHeightDp = preferences.dockHeightFor(external)
+    var dockHeightPreviewDp by remember(external) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(savedDockHeightDp) {
+        if (dockHeightPreviewDp == savedDockHeightDp) dockHeightPreviewDp = null
+    }
+    val activeDockHeightDp = dockHeightPreviewDp ?: savedDockHeightDp
 
     var hadAdbGranted by remember { mutableStateOf(adbAccess == AdbAccess.Granted) }
     LaunchedEffect(adbAccess) {
@@ -736,7 +746,12 @@ fun Desktop(
                                                 },
                                                 onDisplayScale = { scale -> model.save { displayScale(external, scale) } },
                                                 onDock = { model.save { dock(it) } },
-                                                onDockSize = { model.save { dockSize(it) } },
+                                                dockHeightDp = activeDockHeightDp,
+                                                onDockHeightPreview = { dockHeightPreviewDp = it },
+                                                onDockHeightCommit = { height ->
+                                                    dockHeightPreviewDp = height
+                                                    model.save { dockHeight(external, height) }
+                                                },
                                                 onDockAlignment = { model.save { dockAlignment(it) } },
                                                 onShowClock = { model.save { showClock(it) } },
                                                 onShowSystemTray = { model.save { showSystemTray(it) } },
@@ -749,20 +764,43 @@ fun Desktop(
                                                     if (!changeHome()) notice = Notice(R.string.home_settings_unavailable)
                                                 },
                                                 onScreen = { id ->
-                                                    val result = platform.openWorkspaceOn(id)
-                                                    notice = when (result) {
-                                                        LaunchResult.Requested -> null
-                                                        LaunchResult.DisplayDisconnected -> Notice(R.string.display_disconnected)
-                                                        LaunchResult.DisplayRejected, LaunchResult.Unavailable -> Notice(R.string.workspace_display_rejected)
-                                                    }
-                                                    if (result == LaunchResult.Requested && !external) {
-                                                        touchpadTargetDisplayId = id
+                                                    if (launchingExternalDisplayId == null) {
+                                                        val screen = externalScreens.firstOrNull { it.id == id }
+                                                        if (screen == null) {
+                                                            notice = Notice(R.string.display_disconnected)
+                                                        } else {
+                                                            launchingExternalDisplayId = id
+                                                            scope.launch {
+                                                                val outcome = try {
+                                                                    if (onOpenExternalDisplay != null) {
+                                                                        onOpenExternalDisplay(screen)
+                                                                    } else {
+                                                                        when (platform.openWorkspaceOn(id)) {
+                                                                            LaunchResult.Requested -> ExternalLaunchOutcome.Opened
+                                                                            LaunchResult.DisplayDisconnected -> ExternalLaunchOutcome.DisplayDisconnected
+                                                                            LaunchResult.DisplayRejected, LaunchResult.Unavailable -> ExternalLaunchOutcome.Rejected
+                                                                        }
+                                                                    }
+                                                                } finally {
+                                                                    launchingExternalDisplayId = null
+                                                                }
+                                                                notice = when (outcome) {
+                                                                    ExternalLaunchOutcome.Opened -> null
+                                                                    ExternalLaunchOutcome.DisplayDisconnected -> Notice(R.string.display_disconnected)
+                                                                    ExternalLaunchOutcome.Rejected -> Notice(R.string.workspace_display_rejected)
+                                                                }
+                                                                if (outcome == ExternalLaunchOutcome.Opened && !external) {
+                                                                    touchpadTargetDisplayId = id
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 },
                                                 onTouchpad = { id ->
                                                     if (!external) touchpadTargetDisplayId = id
                                                 },
                                                 activeExternalDisplayId = activeExternalDisplayId,
+                                                launchingDisplayId = launchingExternalDisplayId,
                                                 onDisconnectExternal = { id ->
                                                     if (touchpadTargetDisplayId == id) touchpadTargetDisplayId = null
                                                     model.disconnectExternalDisplay(id)
@@ -1002,7 +1040,7 @@ fun Desktop(
                 recent = recent,
                 windows = windows,
                 style = preferences.dock,
-                dockSize = preferences.dockSize,
+                dockHeightDp = activeDockHeightDp,
                 dockAlignment = preferences.dockAlignment,
                 showClock = preferences.showClock,
                 showSystemTray = preferences.showSystemTray,

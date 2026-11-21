@@ -1,15 +1,29 @@
 package dev.opendex.desktop
 
+import dev.opendex.data.DEFAULT_EXTERNAL_DOCK_HEIGHT_DP
+import dev.opendex.data.DEFAULT_LOCAL_DOCK_HEIGHT_DP
 import dev.opendex.data.DisplayScale
+import dev.opendex.data.MAX_DOCK_HEIGHT_DP
+import dev.opendex.data.MIN_DOCK_HEIGHT_DP
 import dev.opendex.data.WindowResizeMode
 import dev.opendex.data.WindowScale
 import dev.opendex.data.WorkspacePreferences
+import dev.opendex.data.computeDockMetrics
 import dev.opendex.data.computeHostedDensityDpi
+import dev.opendex.data.defaultDockHeightDp
 import dev.opendex.data.logicalResolution
 import dev.opendex.platform.cleanWifiSsid
 import java.util.Calendar
 
+import android.view.Display
 import dev.opendex.platform.AdbAccess
+import dev.opendex.platform.ExternalLaunchMethod
+import dev.opendex.platform.ScreenInfo
+import dev.opendex.platform.filterShadowedExternalDisplays
+import dev.opendex.platform.isDisplayActive
+import dev.opendex.platform.isMisplacedExternalLaunch
+import dev.opendex.platform.isOwnHostedVirtualDisplay
+import dev.opendex.platform.resolveExternalLaunchOrder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -200,5 +214,117 @@ class WorkspaceTest {
     @Test fun windowResizeModeDefaultsToLiveAndExposesBothStyles() {
         assertEquals(WindowResizeMode.Live, WorkspacePreferences().windowResizeMode)
         assertEquals(listOf(WindowResizeMode.Live, WindowResizeMode.Outline), WindowResizeMode.entries)
+    }
+
+    @Test fun dockHeightDefaultsSlimmerOnExternalAndClampsOutOfRangeValues() {
+        val prefs = WorkspacePreferences()
+        assertEquals(DEFAULT_EXTERNAL_DOCK_HEIGHT_DP, prefs.dockHeightFor(external = true))
+        assertEquals(DEFAULT_LOCAL_DOCK_HEIGHT_DP, prefs.dockHeightFor(external = false))
+        assertEquals(DEFAULT_EXTERNAL_DOCK_HEIGHT_DP, defaultDockHeightDp(external = true))
+        assertEquals(DEFAULT_LOCAL_DOCK_HEIGHT_DP, defaultDockHeightDp(external = false))
+        assertTrue(prefs.dockHeightFor(external = true) < prefs.dockHeightFor(external = false))
+
+        val outOfRange = WorkspacePreferences(localDockHeightDp = 999, externalDockHeightDp = 10)
+        assertEquals(MAX_DOCK_HEIGHT_DP, outOfRange.dockHeightFor(external = false))
+        assertEquals(MIN_DOCK_HEIGHT_DP, outOfRange.dockHeightFor(external = true))
+    }
+
+    @Test fun computeDockMetricsScalesProportionallyAcrossRange() {
+        val heights = listOf(MIN_DOCK_HEIGHT_DP, DEFAULT_EXTERNAL_DOCK_HEIGHT_DP, 45, 46, DEFAULT_LOCAL_DOCK_HEIGHT_DP, MAX_DOCK_HEIGHT_DP)
+        val metrics = heights.map(::computeDockMetrics)
+
+        metrics.forEach { m ->
+            assertTrue(m.heightDp in MIN_DOCK_HEIGHT_DP..MAX_DOCK_HEIGHT_DP)
+            assertTrue(m.iconDp < m.buttonDp)
+            assertTrue(m.buttonDp < m.heightDp)
+            assertTrue(m.toolIconDp in 15..24)
+            assertTrue(m.trayIconDp in 13..18)
+            assertTrue(m.toolIconDp < m.buttonDp)
+            assertTrue(m.trayIconDp <= m.toolIconDp)
+            assertEquals(m.heightDp < 46, m.compactClock)
+        }
+
+        for (i in 1 until metrics.size) {
+            assertTrue(metrics[i].heightDp >= metrics[i - 1].heightDp)
+            assertTrue(metrics[i].buttonDp >= metrics[i - 1].buttonDp)
+            assertTrue(metrics[i].iconDp >= metrics[i - 1].iconDp)
+            assertTrue(metrics[i].toolIconDp >= metrics[i - 1].toolIconDp)
+            assertTrue(metrics[i].trayIconDp >= metrics[i - 1].trayIconDp)
+        }
+
+        assertEquals(computeDockMetrics(MIN_DOCK_HEIGHT_DP), computeDockMetrics(12))
+        assertEquals(computeDockMetrics(MAX_DOCK_HEIGHT_DP), computeDockMetrics(120))
+    }
+
+    @Test fun ownHostedVirtualDisplayFilterMatchesOnlyOpenDexPrefixes() {
+        assertTrue(isOwnHostedVirtualDisplay("OpenDex-1"))
+        assertTrue(isOwnHostedVirtualDisplay("OpenDex-42"))
+        assertFalse(isOwnHostedVirtualDisplay("Samsung DeX"))
+        assertFalse(isOwnHostedVirtualDisplay("HDMI Screen"))
+        assertFalse(isOwnHostedVirtualDisplay(null))
+        assertFalse(isOwnHostedVirtualDisplay(""))
+    }
+
+    @Test fun displayActiveFilterExcludesOffDisplays() {
+        assertFalse(isDisplayActive(Display.STATE_OFF))
+        assertTrue(isDisplayActive(Display.STATE_ON))
+        assertTrue(isDisplayActive(Display.STATE_UNKNOWN))
+    }
+
+    @Test fun shadowedHdmiDisplayIsHiddenWhenSystemDesktopDisplayIsActive() {
+        val phone = ScreenInfo(0, "Built-in", 1080, 2280, canOpenWorkspace = false, canLaunchActivity = false, canPresent = false)
+        val dexDesktop = ScreenInfo(2, "Desktop", 1920, 1080, canOpenWorkspace = true, canLaunchActivity = true, canPresent = false)
+        val shadowedHdmi = ScreenInfo(14, "Màn hình HDMI", 1920, 1080, canOpenWorkspace = true, canLaunchActivity = true, canPresent = true)
+        assertEquals(
+            listOf(phone, dexDesktop),
+            filterShadowedExternalDisplays(listOf(phone, dexDesktop, shadowedHdmi), currentDisplay = 0),
+        )
+        assertEquals(
+            listOf(phone, shadowedHdmi),
+            filterShadowedExternalDisplays(listOf(phone, shadowedHdmi), currentDisplay = 0),
+        )
+    }
+
+    @Test fun misplacedExternalLaunchDetectsDefaultAndMismatchedDisplays() {
+        assertTrue(isMisplacedExternalLaunch(Display.DEFAULT_DISPLAY, 2))
+        assertTrue(isMisplacedExternalLaunch(Display.DEFAULT_DISPLAY, Display.INVALID_DISPLAY))
+        assertTrue(isMisplacedExternalLaunch(3, 2))
+        assertFalse(isMisplacedExternalLaunch(2, 2))
+        assertFalse(isMisplacedExternalLaunch(2, Display.INVALID_DISPLAY))
+    }
+
+    @Test fun resolveExternalLaunchOrderCoversAllCapabilityCombinations() {
+        assertEquals(
+            listOf(ExternalLaunchMethod.Activity, ExternalLaunchMethod.ShellActivity, ExternalLaunchMethod.Presentation),
+            resolveExternalLaunchOrder(canLaunchActivity = true, canPresent = true, adbGranted = true),
+        )
+        assertEquals(
+            listOf(ExternalLaunchMethod.Activity, ExternalLaunchMethod.Presentation),
+            resolveExternalLaunchOrder(canLaunchActivity = true, canPresent = true, adbGranted = false),
+        )
+        assertEquals(
+            listOf(ExternalLaunchMethod.Activity, ExternalLaunchMethod.ShellActivity, ExternalLaunchMethod.Presentation),
+            resolveExternalLaunchOrder(canLaunchActivity = true, canPresent = false, adbGranted = true),
+        )
+        assertEquals(
+            listOf(ExternalLaunchMethod.Activity, ExternalLaunchMethod.Presentation),
+            resolveExternalLaunchOrder(canLaunchActivity = true, canPresent = false, adbGranted = false),
+        )
+        assertEquals(
+            listOf(ExternalLaunchMethod.Presentation),
+            resolveExternalLaunchOrder(canLaunchActivity = false, canPresent = true, adbGranted = true),
+        )
+        assertEquals(
+            listOf(ExternalLaunchMethod.Presentation),
+            resolveExternalLaunchOrder(canLaunchActivity = false, canPresent = true, adbGranted = false),
+        )
+        assertEquals(
+            listOf(ExternalLaunchMethod.ShellActivity),
+            resolveExternalLaunchOrder(canLaunchActivity = false, canPresent = false, adbGranted = true),
+        )
+        assertEquals(
+            emptyList<ExternalLaunchMethod>(),
+            resolveExternalLaunchOrder(canLaunchActivity = false, canPresent = false, adbGranted = false),
+        )
     }
 }

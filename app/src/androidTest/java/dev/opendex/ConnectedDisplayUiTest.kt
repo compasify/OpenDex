@@ -24,7 +24,7 @@ class ConnectedDisplayUiTest {
         var requestedDisplay: Int? = null
         rule.setContent {
             MaterialTheme {
-                Column { ConnectedDisplays(caps.value) { requestedDisplay = it } }
+                Column { ConnectedDisplays(caps.value, onScreen = { requestedDisplay = it }) }
             }
         }
         val launch = rule.onNodeWithText(context.getString(R.string.test_display, external.id))

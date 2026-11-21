@@ -2,6 +2,7 @@ package dev.opendex
 
 import android.Manifest
 import android.app.Application
+import android.content.Intent
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.net.Uri
@@ -38,17 +39,26 @@ import dev.opendex.desktop.Desktop
 import dev.opendex.desktop.DesktopWindow
 import dev.opendex.desktop.ExternalInputController
 import dev.opendex.desktop.WindowKey
+import dev.opendex.platform.AdbAccess
 import dev.opendex.platform.AdbWindows
 import dev.opendex.platform.AndroidDesktop
 import dev.opendex.platform.DesktopCapabilities
+import dev.opendex.platform.ExternalLaunchMethod
+import dev.opendex.platform.ExternalLaunchOutcome
 import dev.opendex.platform.InstalledApp
+import dev.opendex.platform.LaunchResult
 import dev.opendex.platform.NotificationCenterStore
+import dev.opendex.platform.ScreenInfo
 import dev.opendex.platform.SystemTrayController
 import dev.opendex.platform.installedApps
+import dev.opendex.platform.resolveExternalLaunchOrder
 import dev.opendex.ui.OpenDexTheme
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -57,37 +67,56 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
-class MainActivity : ComponentActivity() {
-    private lateinit var desktop: AndroidDesktop
-    private lateinit var model: WorkspaceModel
+open class MainActivity : ComponentActivity() {
+    protected lateinit var desktop: AndroidDesktop
+    protected lateinit var model: WorkspaceModel
     private lateinit var systemTray: SystemTrayController
     private var capabilities by mutableStateOf(DesktopCapabilities())
     private var notificationAccessGranted by mutableStateOf(false)
     private var searchRequests by mutableIntStateOf(0)
     private var savedScreenBrightness: Float? = null
+    private var externalPresentation: ExternalDesktopPresentation? = null
     private val homeRequest = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { refresh() }
     private val wallpaperPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) model.importCustomWallpaper(uri)
     }
     private val locationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-        systemTray.onPermissionsChanged()
+        if (::systemTray.isInitialized) systemTray.onPermissionsChanged()
     }
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = refresh()
-        override fun onDisplayRemoved(displayId: Int) = refresh()
-        override fun onDisplayChanged(displayId: Int) = refresh()
+        override fun onDisplayRemoved(displayId: Int) {
+            if (externalPresentation?.targetDisplayId == displayId) {
+                dismissExternalPresentation()
+                if (::model.isInitialized) model.disconnectExternalDisplay(displayId)
+            }
+            refresh()
+        }
+        override fun onDisplayChanged(displayId: Int) {
+            if (externalPresentation?.targetDisplayId == displayId) {
+                externalPresentation?.refreshCapabilities()
+            }
+            refresh()
+        }
     }
     private val windowLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
-        if (desktop.currentDisplayId() != capabilities.currentDisplay) refresh()
+        if (::desktop.isInitialized && desktop.currentDisplayId() != capabilities.currentDisplay) refresh()
     }
+
+    protected open fun shouldFinishBeforeContent(launchIntent: Intent?): Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
-        hideSystemBars()
         desktop = AndroidDesktop(this)
         model = ViewModelProvider(this)[WorkspaceModel::class.java]
+        if (shouldFinishBeforeContent(intent)) {
+            finishAndRemoveTask()
+            return
+        }
+        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
+        hideSystemBars()
         systemTray = SystemTrayController(this)
         refresh()
         setContent {
@@ -133,6 +162,7 @@ class MainActivity : ComponentActivity() {
                     onKeepScreenOn = ::setKeepScreenOn,
                     onDimScreen = ::setDimmed,
                     onMoveToBackground = { moveTaskToBack(true) },
+                    onOpenExternalDisplay = ::openExternalWorkspace,
                 ) {
                     runCatching { homeRequest.launch(desktop.homeIntent()) }.isSuccess
                 }
@@ -142,6 +172,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (!::systemTray.isInitialized || !::desktop.isInitialized) return
         systemTray.start()
         desktop.displayManager.registerDisplayListener(displayListener, null)
         window.decorView.viewTreeObserver.addOnGlobalLayoutListener(windowLayoutListener)
@@ -150,6 +181,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!::systemTray.isInitialized || !::desktop.isInitialized || !::model.isInitialized) return
         hideSystemBars()
         model.adbWindows.refresh()
         systemTray.refresh()
@@ -160,6 +192,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        if (!::desktop.isInitialized) return
         refresh()
     }
 
@@ -172,15 +205,17 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        model.externalInput.unregisterExternalHost(this)
-        systemTray.stop()
-        window.decorView.viewTreeObserver.removeOnGlobalLayoutListener(windowLayoutListener)
-        desktop.displayManager.unregisterDisplayListener(displayListener)
+        if (::model.isInitialized) model.externalInput.unregisterExternalHost(this)
+        if (::systemTray.isInitialized) systemTray.stop()
+        if (::desktop.isInitialized) {
+            window?.decorView?.viewTreeObserver?.removeOnGlobalLayoutListener(windowLayoutListener)
+            desktop.displayManager.unregisterDisplayListener(displayListener)
+        }
         super.onStop()
     }
 
     override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
-        if (capabilities.external && ev.deviceId > 0 && ev.isFromSource(InputDevice.SOURCE_MOUSE)) {
+        if (::model.isInitialized && capabilities.external && ev.deviceId > 0 && ev.isFromSource(InputDevice.SOURCE_MOUSE)) {
             model.externalInput.onNativeExternalMouseEvent()
         }
         return super.dispatchGenericMotionEvent(ev)
@@ -188,12 +223,124 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
+        if (hasFocus && ::systemTray.isInitialized && ::desktop.isInitialized) {
             hideSystemBars()
             systemTray.refresh()
             notificationAccessGranted = NotificationCenterStore.isAccessGranted(this)
             refresh()
         }
+    }
+
+    override fun onDestroy() {
+        dismissExternalPresentation()
+        super.onDestroy()
+    }
+
+    private fun dismissExternalPresentation() {
+        val current = externalPresentation ?: return
+        externalPresentation = null
+        runCatching { if (current.isShowing) current.dismiss() }
+    }
+
+    private suspend fun awaitExternalHostAttempt(
+        targetDisplayId: Int,
+        timeoutMs: Long,
+        trigger: suspend () -> Boolean,
+    ): Boolean = coroutineScope {
+        val result = CompletableDeferred<Boolean>()
+        val activeJob = launch(start = CoroutineStart.UNDISPATCHED) {
+            model.externalInput.activeExternalDisplayId.first { it == targetDisplayId }
+            result.complete(true)
+        }
+        val rejectedJob = launch(start = CoroutineStart.UNDISPATCHED) {
+            model.externalInput.rejectedExternalLaunch.first { it == targetDisplayId }
+            result.complete(false)
+        }
+        try {
+            if (!trigger()) return@coroutineScope false
+            withTimeoutOrNull(timeoutMs) { result.await() } ?: false
+        } finally {
+            activeJob.cancel()
+            rejectedJob.cancel()
+        }
+    }
+
+    private suspend fun openExternalWorkspace(screen: ScreenInfo): ExternalLaunchOutcome {
+        if (desktop.findDisplay(screen.id) == null) return ExternalLaunchOutcome.DisplayDisconnected
+        if (model.externalInput.activeExternalDisplayId.value == screen.id) return ExternalLaunchOutcome.Opened
+        val order = resolveExternalLaunchOrder(
+            canLaunchActivity = screen.canLaunchActivity,
+            canPresent = screen.canPresent,
+            adbGranted = model.adbWindows.access.value == AdbAccess.Granted,
+        )
+        for (method in order) {
+            when (method) {
+                ExternalLaunchMethod.Activity -> {
+                    var launchResult = LaunchResult.DisplayRejected
+                    val opened = awaitExternalHostAttempt(screen.id, timeoutMs = 900L) {
+                        launchResult = desktop.openWorkspaceOn(screen.id)
+                        launchResult == LaunchResult.Requested
+                    }
+                    if (launchResult == LaunchResult.DisplayDisconnected) {
+                        return ExternalLaunchOutcome.DisplayDisconnected
+                    }
+                    if (opened) return ExternalLaunchOutcome.Opened
+                }
+                ExternalLaunchMethod.ShellActivity -> {
+                    if (desktop.findDisplay(screen.id) == null) return ExternalLaunchOutcome.DisplayDisconnected
+                    val opened = awaitExternalHostAttempt(screen.id, timeoutMs = 1000L) {
+                        model.adbWindows.launchExternalWorkspace(screen.id)
+                    }
+                    if (opened) return ExternalLaunchOutcome.Opened
+                }
+                ExternalLaunchMethod.Presentation -> {
+                    val targetDisplay = desktop.findDisplay(screen.id)
+                        ?: return ExternalLaunchOutcome.DisplayDisconnected
+                    val shown = runCatching {
+                        dismissExternalPresentation()
+                        val presentation = ExternalDesktopPresentation(
+                            hostActivity = this,
+                            display = targetDisplay,
+                            model = model,
+                            systemTray = systemTray,
+                            searchRequests = searchRequests,
+                            onPickWallpaper = {
+                                runCatching { wallpaperPicker.launch(arrayOf("image/*")) }.isSuccess
+                            },
+                            onRequestLocationPermission = {
+                                runCatching { locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
+                            },
+                            onNotificationAccessCheck = { notificationAccessGranted },
+                            changeHome = {
+                                runCatching { homeRequest.launch(desktop.homeIntent()) }.isSuccess
+                            },
+                            onDismissed = { dismissedId ->
+                                if (externalPresentation?.targetDisplayId == dismissedId) {
+                                    externalPresentation = null
+                                }
+                            },
+                        )
+                        try {
+                            presentation.show()
+                            if (presentation.isShowing) {
+                                externalPresentation = presentation
+                                true
+                            } else {
+                                presentation.release()
+                                false
+                            }
+                        } catch (t: Throwable) {
+                            Log.w("OpenDex", "ExternalDesktopPresentation failed on display ${screen.id}", t)
+                            presentation.release()
+                            throw t
+                        }
+                    }.getOrDefault(false)
+                    if (shown) return ExternalLaunchOutcome.Opened
+                }
+            }
+        }
+        return if (desktop.findDisplay(screen.id) == null) ExternalLaunchOutcome.DisplayDisconnected
+        else ExternalLaunchOutcome.Rejected
     }
 
     private fun hideSystemBars() {

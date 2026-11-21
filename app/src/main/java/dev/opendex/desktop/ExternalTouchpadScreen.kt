@@ -178,6 +178,7 @@ internal fun ExternalTouchpadScreen(
             diagInches >= 7.8 || minOf(maxWidth, maxHeight) >= 540.dp
         }
         val laptopDeckMode = isLandscape && isLargeScreen && !keyboardOpen
+        val compactBar = maxWidth < 680.dp
 
         // Suppress Android's fallback system IME whenever our built-in laptop keyboard is active.
         LaunchedEffect(laptopDeckMode, screen.id) {
@@ -208,223 +209,285 @@ internal fun ExternalTouchpadScreen(
                 .padding(horizontal = if (laptopDeckMode) 14.dp else 12.dp, vertical = if (laptopDeckMode) 8.dp else 10.dp),
             verticalArrangement = Arrangement.spacedBy(if (laptopDeckMode) 8.dp else 10.dp),
         ) {
-        // Top control bar
+        // Top control bar (single row on wide tablets, 2 compact rows on mobile so Close X is always visible)
+        val toggleCaptureMouse: () -> Unit = {
+            val view = touchpadViewRef
+            if (view != null) {
+                if (pointerCaptured) {
+                    view.releasePointerCapture()
+                } else {
+                    if (keyboardOpen) {
+                        keyboardOpen = false
+                        keyboardEditRef?.hideIme()
+                    }
+                    view.requestFocus()
+                    view.requestPointerCapture()
+                }
+            }
+        }
+        val toggleSystemKeyboard: () -> Unit = {
+            val opening = !keyboardOpen
+            keyboardOpen = opening
+            if (opening) {
+                touchpadViewRef?.let { if (it.hasPointerCapture()) it.releasePointerCapture() }
+            } else {
+                keyboardEditRef?.hideIme()
+                touchpadViewRef?.requestFocus()
+            }
+        }
+        val enterBlackout: () -> Unit = {
+            if (keyboardOpen) {
+                keyboardOpen = false
+                keyboardEditRef?.hideIme()
+            }
+            blackoutMode = true
+        }
+
+        val actionControls: @Composable RowScope.() -> Unit = {
+            // Physical mouse capture toggle
+            FilledTonalButton(
+                onClick = toggleCaptureMouse,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                colors = if (pointerCaptured) {
+                    ButtonDefaults.filledTonalButtonColors(
+                        containerColor = colors.primary,
+                        contentColor = colors.onPrimary,
+                    )
+                } else {
+                    ButtonDefaults.filledTonalButtonColors()
+                },
+            ) {
+                Icon(Icons.Default.Mouse, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    stringResource(if (pointerCaptured) R.string.touchpad_mouse_captured else R.string.touchpad_capture_mouse),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
+            }
+
+            // Speed / DPI popover button
+            Box {
+                OutlinedButton(
+                    onClick = { speedMenuOpen = true },
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Icon(Icons.Default.Speed, null, Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("${(liveSpeed * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium)
+                }
+                DropdownMenu(
+                    expanded = speedMenuOpen,
+                    onDismissRequest = { speedMenuOpen = false },
+                ) {
+                    Column(
+                        Modifier
+                            .width(236.dp)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(R.string.touchpad_pointer_speed),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                "${(liveSpeed * 100).roundToInt()}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.primary,
+                            )
+                        }
+                        Slider(
+                            value = liveSpeed,
+                            onValueChange = { liveSpeed = it },
+                            onValueChangeFinished = { onPointerSpeedChange(liveSpeed) },
+                            valueRange = 0.4f..3.0f,
+                        )
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            SPEED_PRESETS.forEach { preset ->
+                                val selected = abs(liveSpeed - preset) < 0.08f
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = {
+                                        liveSpeed = preset
+                                        onPointerSpeedChange(preset)
+                                    },
+                                    label = { Text("${preset}×", style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            IconButton(
+                onClick = { controller.sendKeyCode(KeyEvent.KEYCODE_BACK) },
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.touchpad_back),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            IconButton(
+                onClick = { controller.sendKeyCode(KeyEvent.KEYCODE_F11) },
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.Default.Fullscreen,
+                    contentDescription = stringResource(R.string.true_fullscreen),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            IconButton(
+                onClick = { controller.sendKeyCode(KeyEvent.KEYCODE_K, KeyEvent.META_CTRL_ON) },
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.Default.Apps,
+                    contentDescription = stringResource(R.string.apps),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            IconButton(
+                onClick = toggleSystemKeyboard,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (keyboardOpen) colors.primaryContainer else Color.Transparent),
+            ) {
+                Icon(
+                    Icons.Default.Keyboard,
+                    contentDescription = stringResource(R.string.touchpad_keyboard),
+                    tint = if (keyboardOpen) colors.onPrimaryContainer else colors.onSurface,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+
         Surface(
             shape = RoundedCornerShape(14.dp),
             color = colors.surfaceContainer,
             border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.55f)),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    Icons.Default.TouchApp,
-                    contentDescription = null,
-                    tint = colors.primary,
-                    modifier = Modifier.size(20.dp),
-                )
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        stringResource(R.string.touchpad_mode_title),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        stringResource(R.string.touchpad_target_display, screen.id, screen.width, screen.height),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                // Physical mouse capture toggle
-                FilledTonalButton(
-                    onClick = {
-                        val view = touchpadViewRef ?: return@FilledTonalButton
-                        if (pointerCaptured) {
-                            view.releasePointerCapture()
-                        } else {
-                            if (keyboardOpen) {
-                                keyboardOpen = false
-                                keyboardEditRef?.hideIme()
-                            }
-                            view.requestFocus()
-                            view.requestPointerCapture()
-                        }
-                    },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    colors = if (pointerCaptured) {
-                        ButtonDefaults.filledTonalButtonColors(
-                            containerColor = colors.primary,
-                            contentColor = colors.onPrimary,
+            if (compactBar) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.TouchApp,
+                            contentDescription = null,
+                            tint = colors.primary,
+                            modifier = Modifier.size(20.dp),
                         )
-                    } else {
-                        ButtonDefaults.filledTonalButtonColors()
-                    },
-                ) {
-                    Icon(Icons.Default.Mouse, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        stringResource(if (pointerCaptured) R.string.touchpad_mouse_captured else R.string.touchpad_capture_mouse),
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                    )
-                }
-
-                // Speed / DPI popover button
-                Box {
-                    OutlinedButton(
-                        onClick = { speedMenuOpen = true },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                    ) {
-                        Icon(Icons.Default.Speed, null, Modifier.size(15.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("${(liveSpeed * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium)
-                    }
-                    DropdownMenu(
-                        expanded = speedMenuOpen,
-                        onDismissRequest = { speedMenuOpen = false },
-                    ) {
-                        Column(
-                            Modifier
-                                .width(236.dp)
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    stringResource(R.string.touchpad_pointer_speed),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                Text(
-                                    "${(liveSpeed * 100).roundToInt()}%",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = colors.primary,
-                                )
-                            }
-                            Slider(
-                                value = liveSpeed,
-                                onValueChange = { liveSpeed = it },
-                                onValueChangeFinished = { onPointerSpeedChange(liveSpeed) },
-                                valueRange = 0.4f..3.0f,
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.touchpad_mode_title),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                SPEED_PRESETS.forEach { preset ->
-                                    val selected = abs(liveSpeed - preset) < 0.08f
-                                    FilterChip(
-                                        selected = selected,
-                                        onClick = {
-                                            liveSpeed = preset
-                                            onPointerSpeedChange(preset)
-                                        },
-                                        label = { Text("${preset}×", style = MaterialTheme.typography.labelSmall) },
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                            }
+                            Text(
+                                stringResource(R.string.touchpad_target_display, screen.id, screen.width, screen.height),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        IconButton(onClick = enterBlackout, modifier = Modifier.size(36.dp)) {
+                            Icon(
+                                Icons.Default.Bedtime,
+                                contentDescription = stringResource(R.string.touchpad_blackout),
+                                modifier = Modifier.size(19.dp),
+                            )
+                        }
+                        FilledTonalIconButton(onClick = onExit, modifier = Modifier.size(36.dp)) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = stringResource(R.string.touchpad_exit),
+                                modifier = Modifier.size(18.dp),
+                            )
                         }
                     }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        actionControls()
+                    }
                 }
-
-                IconButton(
-                    onClick = { controller.sendKeyCode(KeyEvent.KEYCODE_BACK) },
-                    modifier = Modifier.size(36.dp),
+            } else {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.touchpad_back),
+                        Icons.Default.TouchApp,
+                        contentDescription = null,
+                        tint = colors.primary,
                         modifier = Modifier.size(20.dp),
                     )
-                }
-
-                IconButton(
-                    onClick = { controller.sendKeyCode(KeyEvent.KEYCODE_F11) },
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Fullscreen,
-                        contentDescription = stringResource(R.string.true_fullscreen),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-
-                IconButton(
-                    onClick = { controller.sendKeyCode(KeyEvent.KEYCODE_K, KeyEvent.META_CTRL_ON) },
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Apps,
-                        contentDescription = stringResource(R.string.apps),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-
-                IconButton(
-                    onClick = {
-                        val opening = !keyboardOpen
-                        keyboardOpen = opening
-                        if (opening) {
-                            touchpadViewRef?.let { if (it.hasPointerCapture()) it.releasePointerCapture() }
-                        } else {
-                            keyboardEditRef?.hideIme()
-                            touchpadViewRef?.requestFocus()
-                        }
-                    },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (keyboardOpen) colors.primaryContainer else Color.Transparent),
-                ) {
-                    Icon(
-                        Icons.Default.Keyboard,
-                        contentDescription = stringResource(R.string.touchpad_keyboard),
-                        tint = if (keyboardOpen) colors.onPrimaryContainer else colors.onSurface,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-
-                IconButton(
-                    onClick = {
-                        if (keyboardOpen) {
-                            keyboardOpen = false
-                            keyboardEditRef?.hideIme()
-                        }
-                        blackoutMode = true
-                    },
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Bedtime,
-                        contentDescription = stringResource(R.string.touchpad_blackout),
-                        modifier = Modifier.size(19.dp),
-                    )
-                }
-
-                FilledTonalIconButton(
-                    onClick = onExit,
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = stringResource(R.string.touchpad_exit),
-                        modifier = Modifier.size(18.dp),
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.touchpad_mode_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            stringResource(R.string.touchpad_target_display, screen.id, screen.width, screen.height),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    actionControls()
+                    IconButton(onClick = enterBlackout, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.Default.Bedtime,
+                            contentDescription = stringResource(R.string.touchpad_blackout),
+                            modifier = Modifier.size(19.dp),
+                        )
+                    }
+                    FilledTonalIconButton(onClick = onExit, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = stringResource(R.string.touchpad_exit),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
             }
         }

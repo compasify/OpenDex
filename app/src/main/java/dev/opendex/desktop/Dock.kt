@@ -46,8 +46,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import dev.opendex.R
 import dev.opendex.data.DockAlignment
-import dev.opendex.data.DockSize
 import dev.opendex.data.DockStyle
+import dev.opendex.data.computeDockMetrics
 import dev.opendex.platform.InstalledApp
 import dev.opendex.platform.SystemStatus
 import java.text.DateFormat
@@ -62,7 +62,7 @@ internal fun Dock(
     recent: List<String>,
     windows: List<DesktopWindow>,
     style: DockStyle,
-    dockSize: DockSize,
+    dockHeightDp: Int,
     dockAlignment: DockAlignment,
     showClock: Boolean,
     showSystemTray: Boolean,
@@ -101,16 +101,18 @@ internal fun Dock(
     val floating = style == DockStyle.Floating
     val totalOpenCount = windows.size + appWindows.count { it.appId in byId }
     val hasVisibleWindows = windows.any { !it.minimized } || appWindows.any { !it.minimized && it.appId in byId }
-    val shape = RoundedCornerShape(if (floating) 18.dp else 0.dp)
-    val buttonDp = dockSize.buttonDp.dp
-    val iconDp = dockSize.iconDp
+    val metrics = remember(dockHeightDp) { computeDockMetrics(dockHeightDp) }
+    val shape = RoundedCornerShape(if (floating) metrics.floatingCornerDp.dp else 0.dp)
+    val buttonDp = metrics.buttonDp.dp
+    val iconDp = metrics.iconDp
+    val verticalPadding = if (floating) metrics.floatingVerticalPaddingDp.dp else 0.dp
     var dockMenu by remember { mutableStateOf(false) }
 
     BoxWithConstraints(
         modifier.fillMaxWidth()
             .padding(
                 horizontal = if (floating) 12.dp else 0.dp,
-                vertical = if (floating) 6.dp else 0.dp,
+                vertical = verticalPadding,
             ),
         contentAlignment = when {
             !floating -> Alignment.Center
@@ -149,7 +151,7 @@ internal fun Dock(
                 val history = recent.filterNot { it in pins || it in openIds }.mapNotNull(byId::get)
                 val hasCenterItems = windows.isNotEmpty() || pinnedApps.isNotEmpty() || unpinnedOpen.isNotEmpty() || history.isNotEmpty()
                 Row(
-                    Modifier.height(dockSize.heightDp.dp).padding(
+                    Modifier.height(metrics.heightDp.dp).padding(
                         start = if (floating) 8.dp else 10.dp,
                         end = if (onToggleShowDesktop != null && !floating) 0.dp else if (floating) 6.dp else 10.dp,
                     ),
@@ -158,7 +160,7 @@ internal fun Dock(
                 ) {
                     ToolButton(Icons.Default.Apps, stringResource(R.string.apps), onDrawer, selected = drawer, size = buttonDp)
                     if (hasCenterItems) {
-                        DockDivider(dockSize.heightDp)
+                        DockDivider(metrics.heightDp)
 
                         val centerModifier = if (floating) {
                             Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState())
@@ -207,7 +209,7 @@ internal fun Dock(
                                 )
                             }
                             if ((unpinnedOpen.isNotEmpty() || history.isNotEmpty()) && (pinnedApps.isNotEmpty() || windows.isNotEmpty())) {
-                                DockDivider(dockSize.heightDp)
+                                DockDivider(metrics.heightDp)
                             }
                             unpinnedOpen.forEach { (app, openWindow) ->
                                 AppButton(
@@ -248,7 +250,7 @@ internal fun Dock(
                     }
 
                     if (onOpenTouchpad != null) {
-                        DockDivider(dockSize.heightDp)
+                        DockDivider(metrics.heightDp)
                         ToolButton(
                             icon = Icons.Default.TouchApp,
                             label = stringResource(R.string.open_touchpad_mode),
@@ -258,7 +260,7 @@ internal fun Dock(
                     }
 
                     if (totalOpenCount > 0) {
-                        DockDivider(dockSize.heightDp)
+                        DockDivider(metrics.heightDp)
                         WindowManagerButton(
                             count = totalOpenCount,
                             selected = windowManagerOpen,
@@ -268,27 +270,29 @@ internal fun Dock(
                     }
 
                     if (canShowTray) {
-                        DockDivider(dockSize.heightDp)
+                        DockDivider(metrics.heightDp)
                         SystemTrayCluster(
                             status = systemStatus,
                             expandedIcons = expandedTrayIcons,
                             selected = quickSettingsOpen,
                             height = buttonDp,
+                            iconSize = metrics.trayIconDp.dp,
                             onClick = onQuickSettings,
                         )
                         NotificationTrayButton(
                             count = notificationCount,
                             selected = notificationsOpen,
                             size = buttonDp,
+                            iconSize = metrics.toolIconDp.dp,
                             onClick = onNotifications,
                         )
                     }
 
                     if (canShowClock) {
-                        if (!canShowTray) DockDivider(dockSize.heightDp)
+                        if (!canShowTray) DockDivider(metrics.heightDp)
                         DockClock(
                             external = external,
-                            compact = dockSize == DockSize.Compact,
+                            compact = metrics.compactClock,
                             selected = calendarOpen,
                             height = buttonDp,
                             onClick = onCalendar,
@@ -299,7 +303,7 @@ internal fun Dock(
                             hasVisibleWindows = hasVisibleWindows,
                             hasOpenWindows = totalOpenCount > 0,
                             floating = floating,
-                            height = if (floating) buttonDp else dockSize.heightDp.dp,
+                            height = if (floating) buttonDp else metrics.heightDp.dp,
                             onClick = onToggleShowDesktop,
                         )
                     }
@@ -394,7 +398,7 @@ private fun WindowManagerButton(count: Int, selected: Boolean, size: Dp, onClick
     val focus by interactions.collectIsFocusedAsState()
     val hover by interactions.collectIsHoveredAsState()
     val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(if (size <= 32.dp) 7.dp else 10.dp)
     val label = pluralStringResource(R.plurals.manage_open_windows, count, count)
     val fill = when {
         selected -> colors.secondaryContainer
@@ -408,12 +412,12 @@ private fun WindowManagerButton(count: Int, selected: Boolean, size: Dp, onClick
             .then(if (focus) Modifier.border(1.5.dp, colors.primary, shape) else Modifier)
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable(interactions, indication = LocalIndication.current, role = Role.Button, onClickLabel = label, onClick = onClick)
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = if (size <= 32.dp) 5.dp else 8.dp)
             .semantics { contentDescription = label },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Icon(Icons.Default.DynamicFeed, null, Modifier.size(18.dp), tint = colors.primary)
+        Icon(Icons.Default.DynamicFeed, null, Modifier.size(if (size <= 32.dp) 14.dp else 18.dp), tint = colors.primary)
         Box(
             Modifier.clip(RoundedCornerShape(6.dp))
                 .background(colors.primary.copy(alpha = 0.16f))
@@ -466,14 +470,18 @@ private fun DockClock(
             .then(if (focused) Modifier.border(1.5.dp, colors.primary, shape) else Modifier)
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable(interactions, LocalIndication.current, role = Role.Button, onClickLabel = label, onClick = onClick)
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = if (height <= 32.dp) 6.dp else 8.dp)
             .semantics { contentDescription = label },
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
             timeText,
-            style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+            style = when {
+                height <= 32.dp -> MaterialTheme.typography.labelSmall
+                compact -> MaterialTheme.typography.labelMedium
+                else -> MaterialTheme.typography.labelLarge
+            },
             fontWeight = FontWeight.SemiBold,
         )
         if (!compact) {
@@ -646,7 +654,7 @@ internal fun ToolButton(
         val focus by interactions.collectIsFocusedAsState()
         val hover by interactions.collectIsHoveredAsState()
         val colors = MaterialTheme.colorScheme
-        val shape = RoundedCornerShape(if (desktop) 8.dp else 11.dp)
+        val shape = RoundedCornerShape(if (desktop) 8.dp else if (size <= 32.dp) 7.dp else 11.dp)
         val fill = when {
             selected -> colors.secondaryContainer
             hover || focus -> if (desktop) Color.White.copy(alpha = 0.16f) else colors.surfaceContainerHighest
@@ -665,14 +673,14 @@ internal fun ToolButton(
             Icon(
                 icon,
                 null,
-                modifier = Modifier.size(if (desktop) 30.dp else if (size <= 40.dp) 19.dp else 22.dp),
+                modifier = Modifier.size(if (desktop) 30.dp else (size * 0.52f).coerceIn(15.dp, 24.dp)),
                 tint = if (desktop) Color.White else colors.primary,
             )
             if (!desktop && running) {
                 Box(
                     Modifier.align(Alignment.BottomCenter)
-                        .padding(bottom = 3.dp)
-                        .size(width = if (selected) 14.dp else 6.dp, height = 2.5.dp)
+                        .padding(bottom = if (size <= 32.dp) 1.5.dp else 3.dp)
+                        .size(width = if (selected) 14.dp else 6.dp, height = if (size <= 32.dp) 2.dp else 2.5.dp)
                         .clip(RoundedCornerShape(2.dp))
                         .background(if (selected) colors.primary else colors.onSurfaceVariant),
                 )
@@ -877,7 +885,7 @@ private fun AppButton(
     val focused by interactions.collectIsFocusedAsState()
     val hovered by interactions.collectIsHoveredAsState()
     val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(if (buttonSize <= 32.dp) 7.dp else 10.dp)
     val dockDescription = when {
         running && !runningVisible -> stringResource(R.string.minimized_app, app.label)
         running -> stringResource(R.string.running_app, app.label)
@@ -933,8 +941,8 @@ private fun AppButton(
         if (!isRow && running) {
             Box(
                 Modifier.align(Alignment.BottomCenter)
-                    .padding(bottom = 2.dp)
-                    .size(width = if (runningVisible) 16.dp else 7.dp, height = 2.5.dp)
+                    .padding(bottom = if (buttonSize <= 32.dp) 1.dp else 2.dp)
+                    .size(width = if (runningVisible) 16.dp else 7.dp, height = if (buttonSize <= 32.dp) 2.dp else 2.5.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(if (runningVisible) colors.primary else colors.onSurfaceVariant),
             )

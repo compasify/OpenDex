@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dev.opendex.R
@@ -44,15 +45,50 @@ enum class DockStyle(@get:StringRes val label: Int) {
     Panel(R.string.dock_panel),
 }
 
-enum class DockSize(
-    @get:StringRes val label: Int,
+const val MIN_DOCK_HEIGHT_DP = 32
+const val MAX_DOCK_HEIGHT_DP = 68
+const val DEFAULT_LOCAL_DOCK_HEIGHT_DP = 52
+const val DEFAULT_EXTERNAL_DOCK_HEIGHT_DP = 40
+
+internal fun defaultDockHeightDp(external: Boolean): Int =
+    if (external) DEFAULT_EXTERNAL_DOCK_HEIGHT_DP else DEFAULT_LOCAL_DOCK_HEIGHT_DP
+
+data class DockMetrics(
     val heightDp: Int,
     val buttonDp: Int,
     val iconDp: Int,
-) {
-    Compact(R.string.dock_size_compact, 48, 38, 24),
-    Medium(R.string.dock_size_medium, 56, 44, 28),
-    Large(R.string.dock_size_large, 64, 50, 32),
+    val toolIconDp: Int,
+    val trayIconDp: Int,
+    val floatingCornerDp: Int,
+    val floatingVerticalPaddingDp: Int,
+    val compactClock: Boolean,
+)
+
+/**
+ * Computes proportional button, icon, corner, and padding sizes for a dock height in dp.
+ */
+internal fun computeDockMetrics(heightDp: Int): DockMetrics {
+    val clamped = heightDp.coerceIn(MIN_DOCK_HEIGHT_DP, MAX_DOCK_HEIGHT_DP)
+    val buttonDp = (clamped * 0.80f).roundToInt().coerceIn(26, 56)
+    val iconDp = (buttonDp * 0.66f).roundToInt().coerceIn(18, 36)
+    val toolIconDp = (buttonDp * 0.52f).roundToInt().coerceIn(15, 24)
+    val trayIconDp = (buttonDp * 0.42f).roundToInt().coerceIn(13, 18)
+    val floatingCornerDp = (clamped * 0.30f).roundToInt().coerceIn(10, 18)
+    val floatingVerticalPaddingDp = when {
+        clamped <= 40 -> 4
+        clamped <= 48 -> 5
+        else -> 6
+    }
+    return DockMetrics(
+        heightDp = clamped,
+        buttonDp = buttonDp,
+        iconDp = iconDp,
+        toolIconDp = toolIconDp,
+        trayIconDp = trayIconDp,
+        floatingCornerDp = floatingCornerDp,
+        floatingVerticalPaddingDp = floatingVerticalPaddingDp,
+        compactClock = clamped < 46,
+    )
 }
 
 enum class DockAlignment(@get:StringRes val label: Int) {
@@ -122,7 +158,8 @@ data class WorkspacePreferences(
     val wallpaper: Wallpaper = Wallpaper.Mountain,
     val customWallpaperPath: String = "",
     val dock: DockStyle = DockStyle.Floating,
-    val dockSize: DockSize = DockSize.Medium,
+    val localDockHeightDp: Int = DEFAULT_LOCAL_DOCK_HEIGHT_DP,
+    val externalDockHeightDp: Int = DEFAULT_EXTERNAL_DOCK_HEIGHT_DP,
     val dockAlignment: DockAlignment = DockAlignment.Center,
     val showClock: Boolean = true,
     val showSystemTray: Boolean = true,
@@ -140,6 +177,10 @@ data class WorkspacePreferences(
 ) {
     fun displayScaleFor(external: Boolean): DisplayScale =
         if (external) externalDisplayScale else localDisplayScale
+
+    fun dockHeightFor(external: Boolean): Int =
+        (if (external) externalDockHeightDp else localDockHeightDp)
+            .coerceIn(MIN_DOCK_HEIGHT_DP, MAX_DOCK_HEIGHT_DP)
 }
 
 class WorkspaceStore(context: Context) {
@@ -151,7 +192,9 @@ class WorkspaceStore(context: Context) {
     private val wallpaper = stringPreferencesKey("wallpaper")
     private val customWallpaperPath = stringPreferencesKey("custom_wallpaper_path")
     private val dock = stringPreferencesKey("dock")
-    private val dockSize = stringPreferencesKey("dock_size")
+    private val legacyDockSize = stringPreferencesKey("dock_size")
+    private val localDockHeightDp = intPreferencesKey("local_dock_height_dp")
+    private val externalDockHeightDp = intPreferencesKey("external_dock_height_dp")
     private val dockAlignment = stringPreferencesKey("dock_alignment")
     private val showClock = booleanPreferencesKey("show_clock")
     private val showSystemTray = booleanPreferencesKey("show_system_tray")
@@ -174,6 +217,11 @@ class WorkspaceStore(context: Context) {
         true
     }.map { p ->
         onReadError(false)
+        val legacyLocalHeight = when (p[legacyDockSize]) {
+            "Compact" -> 44
+            "Large" -> 64
+            else -> DEFAULT_LOCAL_DOCK_HEIGHT_DP
+        }
         WorkspacePreferences(
             pins = p[pins].orEmpty().lineSequence().filter(String::isNotBlank).distinct().toList(),
             desktopApps = p[desktopApps].orEmpty().lineSequence().filter(String::isNotBlank).distinct().toList(),
@@ -182,7 +230,8 @@ class WorkspaceStore(context: Context) {
             wallpaper = Wallpaper.entries.find { it.name == p[wallpaper] } ?: Wallpaper.Mountain,
             customWallpaperPath = p[customWallpaperPath].orEmpty(),
             dock = DockStyle.entries.find { it.name == p[dock] } ?: DockStyle.Floating,
-            dockSize = DockSize.entries.find { it.name == p[dockSize] } ?: DockSize.Medium,
+            localDockHeightDp = (p[localDockHeightDp] ?: legacyLocalHeight).coerceIn(MIN_DOCK_HEIGHT_DP, MAX_DOCK_HEIGHT_DP),
+            externalDockHeightDp = (p[externalDockHeightDp] ?: DEFAULT_EXTERNAL_DOCK_HEIGHT_DP).coerceIn(MIN_DOCK_HEIGHT_DP, MAX_DOCK_HEIGHT_DP),
             dockAlignment = DockAlignment.entries.find { it.name == p[dockAlignment] } ?: DockAlignment.Center,
             showClock = p[showClock] ?: true,
             showSystemTray = p[showSystemTray] ?: true,
@@ -216,7 +265,10 @@ class WorkspaceStore(context: Context) {
         it[wallpaper] = Wallpaper.Custom.name
     }
     suspend fun dock(value: DockStyle) = store.edit { it[dock] = value.name }
-    suspend fun dockSize(value: DockSize) = store.edit { it[dockSize] = value.name }
+    suspend fun dockHeight(external: Boolean, heightDp: Int) = store.edit {
+        it[if (external) externalDockHeightDp else localDockHeightDp] =
+            heightDp.coerceIn(MIN_DOCK_HEIGHT_DP, MAX_DOCK_HEIGHT_DP)
+    }
     suspend fun dockAlignment(value: DockAlignment) = store.edit { it[dockAlignment] = value.name }
     suspend fun showClock(value: Boolean) = store.edit { it[showClock] = value }
     suspend fun showSystemTray(value: Boolean) = store.edit { it[showSystemTray] = value }

@@ -48,7 +48,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
         .tag("opendex-freeform-${Process.myUid()}")
         .processNameSuffix("freeform_shell")
         .daemon(false)
-        .version(8)
+        .version(9)
 
     private val binderReceived = Shizuku.OnBinderReceivedListener { refresh() }
     private val binderDead = Shizuku.OnBinderDeadListener {
@@ -254,6 +254,17 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
                 data.writeInt(if (suppress) 1 else 0)
             },
             read = { Unit },
+        )
+    }
+
+    override suspend fun launchExternalWorkspace(displayId: Int): Boolean {
+        if (closed || displayId == Display.DEFAULT_DISPLAY || displayId == Display.INVALID_DISPLAY) return false
+        if (detect() != AdbAccess.Granted) return false
+        return transact(
+            code = LAUNCH_EXTERNAL_WORKSPACE,
+            defaultValue = false,
+            write = { data -> data.writeInt(displayId) },
+            read = { reply -> reply.readInt() == 1 },
         )
     }
 

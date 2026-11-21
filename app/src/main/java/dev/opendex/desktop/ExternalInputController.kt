@@ -9,14 +9,42 @@ import android.view.InputDevice
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
 import dev.opendex.platform.AdbAccess
 import dev.opendex.platform.AdbWindows
 import java.lang.ref.WeakReference
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+interface ExternalDisplayHost {
+    val displayId: Int
+    val isAlive: Boolean
+    val isPresentation: Boolean
+    fun decorView(): View?
+    fun closeHost()
+    fun onBackPressed() = Unit
+}
+
+private class ActivityHost(
+    activity: Activity,
+    override val displayId: Int,
+) : ExternalDisplayHost {
+    private val ref = WeakReference(activity)
+    override val isAlive: Boolean
+        get() = ref.get()?.let { !it.isFinishing && !it.isDestroyed } == true
+    override val isPresentation: Boolean = false
+    override fun decorView(): View? = ref.get()?.window?.decorView
+    override fun closeHost() {
+        ref.get()?.takeIf { !it.isFinishing && !it.isDestroyed }?.finishAndRemoveTask()
+    }
+    fun matches(activity: Activity): Boolean = ref.get() === activity
+}
 
 data class ExternalPointerState(
     val visible: Boolean = false,
@@ -48,7 +76,10 @@ class ExternalInputController(
     private val _activeExternalDisplayId = MutableStateFlow(Display.INVALID_DISPLAY)
     val activeExternalDisplayId: StateFlow<Int> = _activeExternalDisplayId.asStateFlow()
 
-    @Volatile private var hostRef: WeakReference<Activity>? = null
+    private val _rejectedExternalLaunch = MutableSharedFlow<Int>(extraBufferCapacity = 4)
+    val rejectedExternalLaunch: SharedFlow<Int> = _rejectedExternalLaunch.asSharedFlow()
+
+    @Volatile private var activeHost: ExternalDisplayHost? = null
     @Volatile private var hostDisplayId: Int = Display.INVALID_DISPLAY
     @Volatile private var targetDisplayId: Int = Display.INVALID_DISPLAY
     @Volatile private var targetWidthPx: Int = 1920
@@ -57,9 +88,20 @@ class ExternalInputController(
     @Volatile private var primaryPressed: Boolean = false
     @Volatile private var lastHoverDispatchMs: Long = 0L
 
+    fun reportExternalLaunchRejected(displayId: Int) {
+        _rejectedExternalLaunch.tryEmit(displayId)
+    }
+
     fun registerExternalHost(activity: Activity, displayId: Int, widthPx: Int, heightPx: Int) {
         if (displayId == Display.DEFAULT_DISPLAY || displayId == Display.INVALID_DISPLAY) return
-        hostRef = WeakReference(activity)
+        val existing = (activeHost as? ActivityHost)?.takeIf { it.matches(activity) && it.displayId == displayId }
+        registerExternalHost(existing ?: ActivityHost(activity, displayId), widthPx, heightPx)
+    }
+
+    fun registerExternalHost(host: ExternalDisplayHost, widthPx: Int, heightPx: Int) {
+        val displayId = host.displayId
+        if (displayId == Display.DEFAULT_DISPLAY || displayId == Display.INVALID_DISPLAY) return
+        activeHost = host
         hostDisplayId = displayId
         _activeExternalDisplayId.value = displayId
         if (widthPx > 0 && heightPx > 0 && (targetDisplayId == displayId || targetDisplayId == Display.INVALID_DISPLAY)) {
@@ -78,8 +120,13 @@ class ExternalInputController(
     }
 
     fun unregisterExternalHost(activity: Activity) {
-        if (hostRef?.get() === activity) {
-            hostRef = null
+        val current = activeHost as? ActivityHost ?: return
+        if (current.matches(activity)) unregisterExternalHost(current)
+    }
+
+    fun unregisterExternalHost(host: ExternalDisplayHost) {
+        if (activeHost === host) {
+            activeHost = null
             hostDisplayId = Display.INVALID_DISPLAY
             _activeExternalDisplayId.value = Display.INVALID_DISPLAY
         }
@@ -88,18 +135,20 @@ class ExternalInputController(
     fun closeExternalHost(displayId: Int): Boolean {
         hidePointer()
         setSuppressSystemIme(false)
-        val host = hostRef?.get()?.takeIf { !it.isFinishing && !it.isDestroyed && hostDisplayId == displayId }
-            ?: return false
-        hostRef = null
+        val host = activeHostFor(displayId) ?: return false
+        activeHost = null
         hostDisplayId = Display.INVALID_DISPLAY
         _activeExternalDisplayId.value = Display.INVALID_DISPLAY
         if (Looper.myLooper() == Looper.getMainLooper()) {
-            host.finishAndRemoveTask()
+            host.closeHost()
         } else {
-            mainHandler.post { if (!host.isFinishing && !host.isDestroyed) host.finishAndRemoveTask() }
+            mainHandler.post { if (host.isAlive) host.closeHost() }
         }
         return true
     }
+
+    private fun activeHostFor(displayId: Int): ExternalDisplayHost? =
+        activeHost?.takeIf { it.isAlive && it.displayId == displayId && hostDisplayId == displayId }
 
     fun activateTarget(displayId: Int, widthPx: Int, heightPx: Int) {
         if (displayId == Display.DEFAULT_DISPLAY || displayId == Display.INVALID_DISPLAY) return
@@ -398,9 +447,9 @@ class ExternalInputController(
     }
 
     private fun deliverMotion(displayId: Int, event: MotionEvent, isGeneric: Boolean) {
-        if (adbWindows.injectMotion(displayId, event)) return
-        val host = hostRef?.get()?.takeIf { !it.isFinishing && !it.isDestroyed && hostDisplayId == displayId } ?: return
-        val decor = host.window?.decorView ?: return
+        val host = activeHostFor(displayId)
+        if (host?.isPresentation != true && adbWindows.injectMotion(displayId, event)) return
+        val decor = host?.decorView() ?: return
         if (Looper.myLooper() == Looper.getMainLooper()) {
             if (isGeneric) decor.dispatchGenericMotionEvent(event) else decor.dispatchTouchEvent(event)
         } else {
@@ -416,14 +465,23 @@ class ExternalInputController(
     }
 
     private fun deliverKey(displayId: Int, event: KeyEvent) {
-        if (adbWindows.injectKey(displayId, event)) return
-        val host = hostRef?.get()?.takeIf { !it.isFinishing && !it.isDestroyed && hostDisplayId == displayId } ?: return
-        val decor = host.window?.decorView ?: return
+        val host = activeHostFor(displayId)
+        if (host?.isPresentation != true && adbWindows.injectKey(displayId, event)) return
+        val decor = host?.decorView() ?: return
+        fun dispatch(targetEvent: KeyEvent) {
+            val handled = decor.dispatchKeyEvent(targetEvent)
+            if (!handled && host.isPresentation &&
+                targetEvent.keyCode == KeyEvent.KEYCODE_BACK &&
+                targetEvent.action == KeyEvent.ACTION_UP
+            ) {
+                host.onBackPressed()
+            }
+        }
         if (Looper.myLooper() == Looper.getMainLooper()) {
-            decor.dispatchKeyEvent(event)
+            dispatch(event)
         } else {
             val copy = KeyEvent(event)
-            mainHandler.post { decor.dispatchKeyEvent(copy) }
+            mainHandler.post { dispatch(copy) }
         }
     }
 
