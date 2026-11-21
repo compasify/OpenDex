@@ -1,6 +1,8 @@
 package dev.opendex.desktop
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Paint
 import android.os.Build
@@ -47,6 +49,10 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +75,18 @@ private fun hasExternalMouseConnected(): Boolean =
         !device.isVirtual && (device.sources and InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE
     }
 
+private fun hideSystemIme(context: Context, view: View) {
+    val imm = context.getSystemService(InputMethodManager::class.java)
+    imm?.hideSoftInputFromWindow(view.windowToken, 0)
+    var ctx: Context? = context
+    while (ctx is ContextWrapper && ctx !is Activity) {
+        ctx = ctx.baseContext
+    }
+    (ctx as? Activity)?.window?.let { window ->
+        WindowCompat.getInsetsController(window, view).hide(WindowInsetsCompat.Type.ime())
+    }
+}
+
 @Composable
 internal fun ExternalTouchpadScreen(
     screen: ScreenInfo,
@@ -77,6 +95,7 @@ internal fun ExternalTouchpadScreen(
     onPointerSpeedChange: (Float) -> Unit,
     onExit: () -> Unit,
 ) {
+    val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
 
     var liveSpeed by remember(pointerSpeed) { mutableFloatStateOf(pointerSpeed.coerceIn(0.4f, 3.0f)) }
@@ -107,6 +126,7 @@ internal fun ExternalTouchpadScreen(
 
     DisposableEffect(Unit) {
         onDispose {
+            controller.setSuppressSystemIme(false)
             touchpadViewRef?.let { view ->
                 if (view.hasPointerCapture()) view.releasePointerCapture()
             }
@@ -124,15 +144,59 @@ internal fun ExternalTouchpadScreen(
         }
     }
 
-    Column(
+    val rootView = LocalView.current
+    val density = LocalDensity.current
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    var imeWasVisibleForSystemKeyboard by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .background(colors.surface)
-            .windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.captionBar))
-            .imePadding()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.captionBar)),
     ) {
+        val isLandscape = maxWidth > maxHeight
+        val isLargeScreen = remember(context, maxWidth, maxHeight) {
+            val dm = context.resources.displayMetrics
+            val xDpi = dm.xdpi.takeIf { it in 72f..900f } ?: dm.densityDpi.toFloat()
+            val yDpi = dm.ydpi.takeIf { it in 72f..900f } ?: dm.densityDpi.toFloat()
+            val diagInches = hypot(
+                (dm.widthPixels / xDpi).toDouble(),
+                (dm.heightPixels / yDpi).toDouble(),
+            )
+            diagInches >= 7.8 || minOf(maxWidth, maxHeight) >= 540.dp
+        }
+        val laptopDeckMode = isLandscape && isLargeScreen && !keyboardOpen
+
+        // Suppress Android's fallback system IME whenever our built-in laptop keyboard is active.
+        LaunchedEffect(laptopDeckMode, screen.id) {
+            controller.setSuppressSystemIme(laptopDeckMode)
+        }
+        LaunchedEffect(laptopDeckMode, imeVisible) {
+            if (laptopDeckMode && imeVisible) {
+                hideSystemIme(context, rootView)
+            }
+        }
+        // If user dismisses the system IME via the system hide-keyboard button, return to Laptop Deck.
+        LaunchedEffect(keyboardOpen, imeVisible) {
+            if (!keyboardOpen) {
+                imeWasVisibleForSystemKeyboard = false
+            } else if (imeVisible) {
+                imeWasVisibleForSystemKeyboard = true
+            } else if (imeWasVisibleForSystemKeyboard) {
+                imeWasVisibleForSystemKeyboard = false
+                keyboardOpen = false
+                touchpadViewRef?.requestFocus()
+            }
+        }
+
+        Column(
+            Modifier
+                .fillMaxSize()
+                .then(if (laptopDeckMode) Modifier else Modifier.imePadding())
+                .padding(horizontal = if (laptopDeckMode) 14.dp else 12.dp, vertical = if (laptopDeckMode) 8.dp else 10.dp),
+            verticalArrangement = Arrangement.spacedBy(if (laptopDeckMode) 8.dp else 10.dp),
+        ) {
         // Top control bar
         Surface(
             shape = RoundedCornerShape(14.dp),
@@ -279,6 +343,17 @@ internal fun ExternalTouchpadScreen(
                 }
 
                 IconButton(
+                    onClick = { controller.sendKeyCode(KeyEvent.KEYCODE_F11) },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Fullscreen,
+                        contentDescription = stringResource(R.string.true_fullscreen),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+
+                IconButton(
                     onClick = { controller.sendKeyCode(KeyEvent.KEYCODE_K, KeyEvent.META_CTRL_ON) },
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -326,88 +401,59 @@ internal fun ExternalTouchpadScreen(
             }
         }
 
-        // Main touchpad surface
-        Box(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(colors.surfaceContainerLowest)
-                .border(
-                    width = if (pointerCaptured) 2.dp else 1.dp,
-                    color = if (pointerCaptured) colors.primary else colors.outlineVariant.copy(alpha = 0.6f),
-                    shape = RoundedCornerShape(18.dp),
-                ),
-        ) {
-            val dotColor = colors.onSurfaceVariant.copy(alpha = 0.16f).toArgb()
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    ExternalTouchpadView(
-                        context = ctx,
-                        dotColorArgb = dotColor,
-                        controller = controller,
-                        initialSensitivity = liveSpeed,
-                        onInteracted = { hasInteracted = true },
-                        onPointerCaptureChanged = { captured -> pointerCaptured = captured },
-                        onMouseSeen = { mouseDetected = true },
-                    ).also { touchpadViewRef = it }
-                },
-                update = { view ->
-                    view.setDotColor(dotColor)
-                    view.setSensitivity(liveSpeed)
-                },
+        if (laptopDeckMode) {
+            // Laptop deck: full QWERTY keyboard on top, centered trackpad with palm-rest margins below.
+            LaptopKeyboardDeck(
+                controller = controller,
+                modifier = Modifier.weight(0.55f),
             )
-
-            // Center gesture guide (fades away once user starts moving/tapping, or shows mouse capture status)
-            if (!hasInteracted || pointerCaptured) {
+            Box(
+                Modifier
+                    .weight(0.45f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
                 Column(
                     Modifier
-                        .align(Alignment.Center)
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                        .fillMaxHeight()
+                        .fillMaxWidth(0.62f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    if (pointerCaptured) {
-                        Surface(
-                            shape = RoundedCornerShape(999.dp),
-                            color = colors.primaryContainer.copy(alpha = 0.92f),
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(Icons.Default.Mouse, null, Modifier.size(18.dp), tint = colors.onPrimaryContainer)
-                                Text(
-                                    stringResource(R.string.touchpad_mouse_captured_hint),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = colors.onPrimaryContainer,
-                                )
-                            }
-                        }
-                    } else {
-                        Icon(
-                            Icons.Default.TouchApp,
-                            contentDescription = null,
-                            tint = colors.onSurfaceVariant.copy(alpha = 0.35f),
-                            modifier = Modifier.size(40.dp),
-                        )
-                        Text(
-                            stringResource(R.string.touchpad_gestures_hint),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.onSurfaceVariant.copy(alpha = 0.72f),
-                        )
-                        if (mouseDetected) {
-                            Text(
-                                stringResource(R.string.touchpad_physical_mouse_hint),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = colors.primary.copy(alpha = 0.9f),
-                            )
-                        }
-                    }
+                    TouchpadSurfaceBox(
+                        controller = controller,
+                        liveSpeed = liveSpeed,
+                        pointerCaptured = pointerCaptured,
+                        mouseDetected = mouseDetected,
+                        hasInteracted = hasInteracted,
+                        compact = true,
+                        onViewCreated = { touchpadViewRef = it },
+                        onInteracted = { hasInteracted = true },
+                        onPointerCaptureChanged = { pointerCaptured = it },
+                        onMouseSeen = { mouseDetected = true },
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                    MouseClickBar(
+                        controller = controller,
+                        height = 38.dp,
+                        onInteracted = { hasInteracted = true },
+                    )
                 }
             }
+        } else {
+            // Mobile / portrait / system IME layout
+            TouchpadSurfaceBox(
+                controller = controller,
+                liveSpeed = liveSpeed,
+                pointerCaptured = pointerCaptured,
+                mouseDetected = mouseDetected,
+                hasInteracted = hasInteracted,
+                compact = false,
+                onViewCreated = { touchpadViewRef = it },
+                onInteracted = { hasInteracted = true },
+                onPointerCaptureChanged = { pointerCaptured = it },
+                onMouseSeen = { mouseDetected = true },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
         }
 
         // Optional keyboard input strip & quick keys
@@ -493,78 +539,194 @@ internal fun ExternalTouchpadScreen(
             }
         }
 
-        // Bottom Left / Right mouse buttons (Left supports press-and-hold for dragging)
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            var leftHeld by remember { mutableStateOf(false) }
-            Box(
+        if (!laptopDeckMode) {
+            MouseClickBar(
+                controller = controller,
+                height = 52.dp,
+                onInteracted = { hasInteracted = true },
+            )
+        }
+        }
+    }
+}
+
+@Composable
+private fun TouchpadSurfaceBox(
+    controller: ExternalInputController,
+    liveSpeed: Float,
+    pointerCaptured: Boolean,
+    mouseDetected: Boolean,
+    hasInteracted: Boolean,
+    compact: Boolean,
+    onViewCreated: (ExternalTouchpadView) -> Unit,
+    onInteracted: () -> Unit,
+    onPointerCaptureChanged: (Boolean) -> Unit,
+    onMouseSeen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(if (compact) 14.dp else 18.dp)
+    Box(
+        modifier
+            .clip(shape)
+            .background(colors.surfaceContainerLowest)
+            .border(
+                width = if (pointerCaptured) 2.dp else 1.dp,
+                color = if (pointerCaptured) colors.primary else colors.outlineVariant.copy(alpha = 0.6f),
+                shape = shape,
+            ),
+    ) {
+        val dotColor = colors.onSurfaceVariant.copy(alpha = 0.16f).toArgb()
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                ExternalTouchpadView(
+                    context = ctx,
+                    dotColorArgb = dotColor,
+                    controller = controller,
+                    initialSensitivity = liveSpeed,
+                    onInteracted = onInteracted,
+                    onPointerCaptureChanged = onPointerCaptureChanged,
+                    onMouseSeen = onMouseSeen,
+                ).also(onViewCreated)
+            },
+            update = { view ->
+                view.setDotColor(dotColor)
+                view.setSensitivity(liveSpeed)
+            },
+        )
+
+        if (!hasInteracted || pointerCaptured) {
+            Column(
                 Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (leftHeld) colors.primaryContainer else colors.surfaceContainer)
-                    .border(
-                        1.dp,
-                        if (leftHeld) colors.primary else colors.outlineVariant.copy(alpha = 0.6f),
-                        RoundedCornerShape(14.dp),
+                    .align(Alignment.Center)
+                    .padding(if (compact) 12.dp else 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp),
+            ) {
+                if (pointerCaptured) {
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = colors.primaryContainer.copy(alpha = 0.92f),
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Icon(Icons.Default.Mouse, null, Modifier.size(16.dp), tint = colors.onPrimaryContainer)
+                            Text(
+                                stringResource(R.string.touchpad_mouse_captured_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onPrimaryContainer,
+                            )
+                        }
+                    }
+                } else {
+                    if (!compact) {
+                        Icon(
+                            Icons.Default.TouchApp,
+                            contentDescription = null,
+                            tint = colors.onSurfaceVariant.copy(alpha = 0.35f),
+                            modifier = Modifier.size(38.dp),
+                        )
+                    }
+                    Text(
+                        stringResource(R.string.touchpad_gestures_hint),
+                        style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.72f),
                     )
-                    .pointerInput(controller) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                when (event.type) {
-                                    PointerEventType.Press -> {
-                                        hasInteracted = true
-                                        leftHeld = true
-                                        controller.primaryDown()
-                                    }
-                                    PointerEventType.Release -> {
-                                        if (leftHeld) {
-                                            leftHeld = false
-                                            controller.primaryUp()
-                                        }
-                                    }
-                                    else -> Unit
+                    if (mouseDetected) {
+                        Text(
+                            stringResource(R.string.touchpad_physical_mouse_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.primary.copy(alpha = 0.9f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MouseClickBar(
+    controller: ExternalInputController,
+    height: androidx.compose.ui.unit.Dp,
+    onInteracted: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(height),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        var leftHeld by remember { mutableStateOf(false) }
+        val shape = RoundedCornerShape(12.dp)
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clip(shape)
+                .background(if (leftHeld) colors.primaryContainer else colors.surfaceContainer)
+                .border(
+                    1.dp,
+                    if (leftHeld) colors.primary else colors.outlineVariant.copy(alpha = 0.6f),
+                    shape,
+                )
+                .pointerInput(controller) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            when (event.type) {
+                                PointerEventType.Press -> {
+                                    onInteracted()
+                                    leftHeld = true
+                                    controller.primaryDown()
                                 }
+                                PointerEventType.Release -> {
+                                    if (leftHeld) {
+                                        leftHeld = false
+                                        controller.primaryUp()
+                                    }
+                                }
+                                else -> Unit
                             }
                         }
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    stringResource(R.string.touchpad_left_click),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (leftHeld) colors.onPrimaryContainer else colors.onSurface,
-                )
-            }
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                stringResource(R.string.touchpad_left_click),
+                style = MaterialTheme.typography.labelMedium,
+                color = if (leftHeld) colors.onPrimaryContainer else colors.onSurface,
+            )
+        }
 
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(colors.surfaceContainer)
-                    .border(1.dp, colors.outlineVariant.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = ripple(),
-                        onClick = {
-                            hasInteracted = true
-                            controller.secondaryClick()
-                        },
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    stringResource(R.string.touchpad_right_click),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = colors.onSurface,
-                )
-            }
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clip(shape)
+                .background(colors.surfaceContainer)
+                .border(1.dp, colors.outlineVariant.copy(alpha = 0.6f), shape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = ripple(),
+                    onClick = {
+                        onInteracted()
+                        controller.secondaryClick()
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                stringResource(R.string.touchpad_right_click),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurface,
+            )
         }
     }
 }

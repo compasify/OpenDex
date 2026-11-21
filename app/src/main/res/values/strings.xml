@@ -49,6 +49,8 @@
     <string name="window_layout">Window layout</string>
     <string name="float_window">Floating window</string>
     <string name="maximize">Maximize</string>
+    <string name="true_fullscreen">True fullscreen</string>
+    <string name="exit_fullscreen">Exit fullscreen</string>
     <string name="snap_left">Left half</string>
     <string name="snap_right">Right half</string>
     <string name="minimize_tool">Minimize %1$s</string>

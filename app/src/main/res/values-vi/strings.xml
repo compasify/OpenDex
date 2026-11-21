@@ -48,6 +48,8 @@
     <string name="window_layout">Bố cục cửa sổ</string>
     <string name="float_window">Cửa sổ nổi</string>
     <string name="maximize">Phóng to</string>
+    <string name="true_fullscreen">Toàn màn hình thật</string>
+    <string name="exit_fullscreen">Thoát toàn màn hình</string>
     <string name="snap_left">Nửa trái</string>
     <string name="snap_right">Nửa phải</string>
     <string name="minimize_tool">Thu nhỏ %1$s</string>

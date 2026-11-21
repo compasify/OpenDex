@@ -74,6 +74,7 @@ internal fun BoxScope.AppWindow(
     onCommitBounds: (Bounds) -> Unit,
     onOutlinePreview: (Bounds?) -> Unit,
     onPlacement: (Placement) -> Unit,
+    onToggleFullscreen: () -> Unit = {},
     onMinimize: () -> Unit,
     onClose: () -> Unit,
     onSurfaceReady: (Surface, Int, Int) -> Long,
@@ -247,6 +248,11 @@ internal fun BoxScope.AppWindow(
         onClose = onClose,
         onSnapPreview = { preview -> latestOutlinePreview(preview) },
         reserveResizeFooter = false,
+        immersive = window.fullscreen,
+        onToggleFullscreen = {
+            liveBounds = null
+            onToggleFullscreen()
+        },
     ) {
         Box(
             Modifier
@@ -463,8 +469,10 @@ private class HostedAppTextureView(
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (!isWindowActive()) return super.dispatchKeyEvent(event)
-        // Preserve OpenDex global search shortcut (Ctrl+K).
-        if (event.keyCode == KeyEvent.KEYCODE_K && event.hasModifiers(KeyEvent.META_CTRL_ON)) {
+        // Preserve OpenDex global shortcuts (Ctrl+K search, F11 true fullscreen).
+        if ((event.keyCode == KeyEvent.KEYCODE_K && event.hasModifiers(KeyEvent.META_CTRL_ON)) ||
+            event.keyCode == KeyEvent.KEYCODE_F11
+        ) {
             return super.dispatchKeyEvent(event)
         }
         onKey(event)

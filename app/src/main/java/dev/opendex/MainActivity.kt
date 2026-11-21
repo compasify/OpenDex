@@ -127,6 +127,7 @@ class MainActivity : ComponentActivity() {
                         runCatching { locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
                     },
                     onBrightnessChange = { fraction -> systemTray.setBrightness(fraction, window) },
+                    onHideSystemBars = ::hideSystemBars,
                     onMoveToBackground = { moveTaskToBack(true) },
                 ) {
                     runCatching { homeRequest.launch(desktop.homeIntent()) }.isSuccess

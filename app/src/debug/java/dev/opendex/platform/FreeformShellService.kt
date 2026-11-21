@@ -39,6 +39,7 @@ internal const val INJECT_KEY = Binder.FIRST_CALL_TRANSACTION + 6
 internal const val RELEASE_DISPLAY = Binder.FIRST_CALL_TRANSACTION + 7
 internal const val RELEASE_ALL_DISPLAYS = Binder.FIRST_CALL_TRANSACTION + 8
 internal const val LAUNCH_ACTION_ON_DISPLAY = Binder.FIRST_CALL_TRANSACTION + 9
+internal const val SET_SUPPRESS_IME = Binder.FIRST_CALL_TRANSACTION + 10
 private const val DESTROY_USER_SERVICE = 16777115
 private const val PER_ANDROID_USER_UID_RANGE = 100_000
 
@@ -62,6 +63,7 @@ private const val VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP = 1 shl 11
 private const val VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED = 1 shl 12
 private const val INJECT_INPUT_EVENT_MODE_ASYNC = 0
 private const val DISPLAY_IME_POLICY_FALLBACK_DISPLAY = 1
+private const val DISPLAY_IME_POLICY_HIDE = 2
 private const val ANIMATION_SCALE_TRANSITION = 1
 
 /** Created by Shizuku, not exported as an Android component. Accepts no arbitrary commands. */
@@ -70,8 +72,13 @@ class FreeformShellService(private val context: Context) : Binder() {
     private val userId = ownerUid / PER_ANDROID_USER_UID_RANGE
     private val displayCounter = AtomicInteger(0)
     private val displays = ConcurrentHashMap<Int, HostedDisplay>()
+    @Volatile private var suppressImeFallback = false
 
-    private data class HostedDisplay(val virtualDisplay: VirtualDisplay, @Volatile var surface: Surface?)
+    private data class HostedDisplay(
+        val virtualDisplay: VirtualDisplay,
+        @Volatile var surface: Surface?,
+        val packages: MutableSet<String> = ConcurrentHashMap.newKeySet(),
+    )
 
     private val shellContext: Context by lazy {
         runCatching {
@@ -121,7 +128,7 @@ class FreeformShellService(private val context: Context) : Binder() {
             releaseAllDisplays()
             exitProcess(0)
         }
-        if (code !in OPEN_FREEFORM..LAUNCH_ACTION_ON_DISPLAY || reply == null) {
+        if (code !in OPEN_FREEFORM..SET_SUPPRESS_IME || reply == null) {
             return super.onTransact(code, data, reply, flags)
         }
         if (caller != ownerUid || Process.myUid() != SHELL_UID) throw SecurityException("Unexpected caller or backend")
@@ -208,6 +215,20 @@ class FreeformShellService(private val context: Context) : Binder() {
                 reply.writeNoException()
                 reply.writeInt(if (ok) 1 else 0)
             }
+            SET_SUPPRESS_IME -> {
+                val externalDisplayId = data.readInt()
+                val suppress = data.readInt() == 1
+                suppressImeFallback = suppress
+                val policy = if (suppress) DISPLAY_IME_POLICY_HIDE else DISPLAY_IME_POLICY_FALLBACK_DISPLAY
+                if (externalDisplayId != Display.DEFAULT_DISPLAY && externalDisplayId != Display.INVALID_DISPLAY) {
+                    applyDisplayImePolicy(externalDisplayId, policy)
+                }
+                for (vdId in displays.keys) {
+                    applyDisplayImePolicy(vdId, policy)
+                }
+                reply.writeNoException()
+                reply.writeInt(1)
+            }
         }
         return true
     }
@@ -254,14 +275,20 @@ class FreeformShellService(private val context: Context) : Binder() {
     }
 
     private fun configureImeFallback(displayId: Int) {
+        val policy = if (suppressImeFallback) DISPLAY_IME_POLICY_HIDE else DISPLAY_IME_POLICY_FALLBACK_DISPLAY
+        applyDisplayImePolicy(displayId, policy)
+    }
+
+    private fun applyDisplayImePolicy(displayId: Int, policy: Int) {
         runCatching {
             val iwm = windowManager ?: return
             iwm.javaClass.getMethod("setDisplayImePolicy", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-                .invoke(iwm, displayId, DISPLAY_IME_POLICY_FALLBACK_DISPLAY)
+                .invoke(iwm, displayId, policy)
         }.onFailure { Log.d("OpenDex", "setDisplayImePolicy skipped: ${it.message}") }
     }
 
     private fun launchOnVirtualDisplay(component: ComponentName, displayId: Int): Boolean {
+        displays[displayId]?.packages?.add(component.packageName)
         val started = runAm(
             "start", "-W", "--user", userId.toString(),
             "--display", displayId.toString(),
@@ -415,6 +442,13 @@ class FreeformShellService(private val context: Context) : Binder() {
         runCatching { hosted.virtualDisplay.release() }
         runCatching { hosted.surface?.release() }
         hosted.surface = null
+        // Stop app processes (e.g. YouTube background media/PiP services) if no other hosted window uses them.
+        val activePackages = displays.values.flatMapTo(HashSet()) { it.packages }
+        for (pkg in hosted.packages) {
+            if (pkg != context.packageName && pkg !in activePackages) {
+                runAm("force-stop", "--user", userId.toString(), pkg)
+            }
+        }
     }
 
     private fun releaseAllDisplays() {

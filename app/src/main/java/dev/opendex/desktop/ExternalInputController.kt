@@ -111,6 +111,14 @@ class ExternalInputController(
         }
     }
 
+    fun setSuppressSystemIme(suppress: Boolean) {
+        val displayId = targetDisplayId
+        if (adbWindows.access.value != AdbAccess.Granted) return
+        scope.launch {
+            adbWindows.setSuppressExternalIme(displayId, suppress)
+        }
+    }
+
     fun hidePointer() {
         if (primaryPressed) primaryUp()
         val current = _pointerState.value

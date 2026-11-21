@@ -70,10 +70,11 @@ data class AppWindowState(
     val floating: Bounds,
     val placement: Placement = Placement.Floating,
     val minimized: Boolean = false,
+    val fullscreen: Boolean = false,
     val virtualDisplayId: Int = NO_VIRTUAL_DISPLAY,
     val launching: Boolean = true,
 ) {
-    fun bounds(area: Area): Bounds = placement.boundsIn(floating, area)
+    fun bounds(area: Area): Bounds = if (fullscreen) Bounds(0f, 0f, area.width, area.height) else placement.boundsIn(floating, area)
 }
 
 fun defaultAppBounds(area: Area, cascadeIndex: Int): Bounds {
@@ -100,7 +101,7 @@ fun List<AppWindowState>.activateApp(appId: String): List<AppWindowState> {
 }
 
 fun List<AppWindowState>.minimizeAllApps(): List<AppWindowState> = map {
-    if (it.minimized) it else it.copy(minimized = true)
+    if (it.minimized && !it.fullscreen) it else it.copy(minimized = true, fullscreen = false)
 }
 
 fun List<AppWindowState>.restoreApps(ids: Set<String>? = null): List<AppWindowState> = map {

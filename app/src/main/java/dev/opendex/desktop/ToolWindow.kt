@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import kotlinx.coroutines.delay
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -120,6 +121,8 @@ internal fun BoxScope.WindowFrame(
     onClose: () -> Unit,
     onSnapPreview: ((Bounds?) -> Unit)? = null,
     reserveResizeFooter: Boolean = true,
+    immersive: Boolean = false,
+    onToggleFullscreen: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val canTile = area.canTile
@@ -180,15 +183,19 @@ internal fun BoxScope.WindowFrame(
             }
         }
     }
-    val isFloating = placement == Placement.Floating
+    val isFloating = placement == Placement.Floating && !immersive
     val shape = RoundedCornerShape(if (isFloating) 12.dp else 0.dp)
-    val borderStroke = if (placement == Placement.Full) null
+    val borderStroke = if (immersive || placement == Placement.Full) null
         else BorderStroke(1.dp, if (active) colors.outline.copy(alpha = 0.55f) else colors.outlineVariant.copy(alpha = 0.5f))
 
     Surface(
         Modifier.align(AbsoluteAlignment.TopLeft)
-            .absoluteOffset { with(density) { IntOffset(bounds.x.dp.toPx().roundToInt(), bounds.y.dp.toPx().roundToInt()) } }
-            .size(bounds.width.dp, bounds.height.dp)
+            .then(
+                if (immersive) Modifier.fillMaxSize()
+                else Modifier
+                    .absoluteOffset { with(density) { IntOffset(bounds.x.dp.toPx().roundToInt(), bounds.y.dp.toPx().roundToInt()) } }
+                    .size(bounds.width.dp, bounds.height.dp),
+            )
             .onFocusChanged {
                 val entered = it.hasFocus && !windowHasFocus
                 windowHasFocus = it.hasFocus
@@ -209,10 +216,11 @@ internal fun BoxScope.WindowFrame(
         color = colors.surface,
         shape = shape,
         border = borderStroke,
-        shadowElevation = if (placement == Placement.Full) 0.dp else if (active) 14.dp else 4.dp,
+        shadowElevation = if (immersive || placement == Placement.Full) 0.dp else if (active) 14.dp else 4.dp,
     ) {
         Box {
             Column(Modifier.fillMaxSize()) {
+                if (!immersive) {
                 Row(
                     Modifier.fillMaxWidth()
                         .height(34.dp)
@@ -276,6 +284,13 @@ internal fun BoxScope.WindowFrame(
                                 leadingIcon = { Icon(Icons.Default.CropSquare, null, Modifier.size(18.dp)) },
                                 onClick = { choose(Placement.Full) },
                             )
+                            if (onToggleFullscreen != null) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.true_fullscreen)) },
+                                    leadingIcon = { Icon(Icons.Default.Fullscreen, null, Modifier.size(18.dp)) },
+                                    onClick = { menu = false; onToggleFullscreen() },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.snap_left)) },
                                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.ViewSidebar, null, Modifier.size(18.dp)) },
@@ -305,6 +320,15 @@ internal fun BoxScope.WindowFrame(
                         active = active,
                         onClick = { onPlacement(if (isMaximized) Placement.Floating else Placement.Full) },
                     )
+                    if (onToggleFullscreen != null) {
+                        WindowCaptionButton(
+                            icon = Icons.Default.Fullscreen,
+                            label = stringResource(R.string.true_fullscreen),
+                            iconSize = 16.dp,
+                            active = active,
+                            onClick = onToggleFullscreen,
+                        )
+                    }
                     WindowCaptionButton(
                         icon = Icons.Default.Close,
                         label = stringResource(R.string.close_tool, title),
@@ -315,8 +339,80 @@ internal fun BoxScope.WindowFrame(
                     )
                 }
                 HorizontalDivider(thickness = 0.5.dp, color = colors.outlineVariant.copy(alpha = 0.55f))
+                }
                 Box(Modifier.weight(1f).fillMaxWidth().padding(bottom = if (reserveResizeFooter && isFloating) 16.dp else 0.dp)) {
                     content()
+                }
+            }
+            if (immersive && onToggleFullscreen != null) {
+                var revealBar by remember { mutableStateOf(true) }
+                LaunchedEffect(revealBar) {
+                    if (revealBar) {
+                        delay(2800L)
+                        revealBar = false
+                    }
+                }
+                // Thin top-edge hot zone: moving the cursor or tapping near the top reveals exit controls.
+                Box(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth(0.5f)
+                        .height(if (revealBar) 52.dp else 14.dp)
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (event.type == PointerEventType.Enter ||
+                                        event.type == PointerEventType.Move ||
+                                        event.type == PointerEventType.Press
+                                    ) {
+                                        revealBar = true
+                                    }
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    if (revealBar) {
+                        Surface(
+                            modifier = Modifier.padding(top = 8.dp),
+                            shape = RoundedCornerShape(999.dp),
+                            color = colors.surfaceContainer.copy(alpha = 0.92f),
+                            border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.65f)),
+                            shadowElevation = 10.dp,
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                leadingIcon?.invoke()
+                                Text(
+                                    title,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                FilledTonalButton(
+                                    onClick = onToggleFullscreen,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp),
+                                ) {
+                                    Icon(Icons.Default.FullscreenExit, null, Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(stringResource(R.string.exit_fullscreen), style = MaterialTheme.typography.labelSmall)
+                                }
+                                WindowCaptionButton(
+                                    icon = Icons.Default.Close,
+                                    label = stringResource(R.string.close_tool, title),
+                                    iconSize = 15.dp,
+                                    active = true,
+                                    isClose = true,
+                                    onClick = onClose,
+                                )
+                            }
+                        }
+                    }
                 }
             }
             if (isFloating) {

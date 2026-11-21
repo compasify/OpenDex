@@ -118,6 +118,7 @@ fun Desktop(
     onPickWallpaper: () -> Boolean = { false },
     onRequestLocationPermission: () -> Unit = {},
     onBrightnessChange: (Float) -> Unit = {},
+    onHideSystemBars: () -> Unit = {},
     onMoveToBackground: () -> Unit = {},
     changeHome: () -> Boolean,
 ) {
@@ -454,6 +455,14 @@ fun Desktop(
         extras + known
     }
     val activeKey = orderedKeys.lastOrNull()
+    val fullscreenApp = visibleApps.lastOrNull { it.fullscreen }
+    val isImmersive = fullscreenApp != null
+    LaunchedEffect(isImmersive) {
+        if (isImmersive) {
+            closePopovers()
+            onHideSystemBars()
+        }
+    }
     val runningAppIds = remember(appWindows) { appWindows.mapTo(HashSet()) { it.appId } }
     val darkTheme = isThemeDark(preferences.theme)
     val anyPopoverOpen = drawer || windowManagerOpen || quickSettingsOpen || notificationsOpen || calendarOpen
@@ -484,14 +493,29 @@ fun Desktop(
             modifier = Modifier.matchParentSize(),
         )
         Column(
-            // System bars are hidden in immersive mode; reserve display cutout and caption bar only.
-            // Do not shrink the desktop work area with IME insets, or every open app window/VirtualDisplay
-            // would resize on every frame of the soft keyboard animation.
+            // System bars are hidden in immersive mode; reserve display cutout and caption bar only
+            // when not in true app fullscreen. Do not shrink the desktop work area with IME insets,
+            // or every open app window/VirtualDisplay would resize on every frame of the soft keyboard animation.
             Modifier.fillMaxSize()
-                .windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.captionBar))
+                .then(
+                    if (isImmersive) Modifier
+                    else Modifier.windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.captionBar)),
+                )
                 .onPreviewKeyEvent { e ->
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when {
+                        e.key == Key.F11 -> {
+                            if (e.nativeKeyEvent.repeatCount == 0) {
+                                val targetId = fullscreenApp?.appId
+                                    ?: (activeKey as? WindowKey.AppKey)?.appId
+                                    ?: visibleApps.lastOrNull()?.appId
+                                if (targetId != null) {
+                                    model.updateAppWindow(layoutIsExternal, targetId) { it.copy(fullscreen = !it.fullscreen) }
+                                    model.activateAppWindow(layoutIsExternal, targetId)
+                                }
+                            }
+                            true
+                        }
                         e.key == Key.Escape && notice != null -> { notice = null; true }
                         e.key == Key.Escape && anyPopoverOpen -> { closePopovers(); true }
                         e.key == Key.K && e.nativeKeyEvent.hasModifiers(android.view.KeyEvent.META_CTRL_ON) -> {
@@ -752,11 +776,16 @@ fun Desktop(
                                             resizePreview.bounds = preview
                                         },
                                         onPlacement = { placement ->
-                                            model.updateAppWindow(layoutIsExternal, app.id) { it.copy(placement = placement) }
+                                            model.updateAppWindow(layoutIsExternal, app.id) { it.copy(placement = placement, fullscreen = false) }
+                                            model.activateAppWindow(layoutIsExternal, app.id)
+                                        },
+                                        onToggleFullscreen = {
+                                            val entering = !appWindow.fullscreen
+                                            model.updateAppWindow(layoutIsExternal, app.id) { it.copy(fullscreen = entering) }
                                             model.activateAppWindow(layoutIsExternal, app.id)
                                         },
                                         onMinimize = {
-                                            model.updateAppWindow(layoutIsExternal, app.id) { it.copy(minimized = true) }
+                                            model.updateAppWindow(layoutIsExternal, app.id) { it.copy(minimized = true, fullscreen = false) }
                                         },
                                         onClose = {
                                             model.closeAppWindow(layoutIsExternal, app.id)
@@ -945,6 +974,7 @@ fun Desktop(
                     }
                 }
             }
+            if (!isImmersive) {
             Dock(
                 apps = apps,
                 pins = preferences.pins,
@@ -1006,6 +1036,7 @@ fun Desktop(
                     pendingTool = tool
                 },
             )
+            }
         }
         }
         if (external) {

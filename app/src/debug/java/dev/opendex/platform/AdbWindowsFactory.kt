@@ -48,7 +48,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
         .tag("opendex-freeform-${Process.myUid()}")
         .processNameSuffix("freeform_shell")
         .daemon(false)
-        .version(6)
+        .version(8)
 
     private val binderReceived = Shizuku.OnBinderReceivedListener { refresh() }
     private val binderDead = Shizuku.OnBinderDeadListener {
@@ -243,6 +243,19 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
         )
 
     override suspend fun ensureConnected(): Boolean = ensureBinder() != null
+
+    override suspend fun setSuppressExternalIme(externalDisplayId: Int, suppress: Boolean) {
+        if (closed || detect() != AdbAccess.Granted) return
+        transact(
+            code = SET_SUPPRESS_IME,
+            defaultValue = Unit,
+            write = { data ->
+                data.writeInt(externalDisplayId)
+                data.writeInt(if (suppress) 1 else 0)
+            },
+            read = { Unit },
+        )
+    }
 
     override fun injectMotion(displayId: Int, event: MotionEvent): Boolean {
         if (closed || displayId == Display.INVALID_DISPLAY) return false
