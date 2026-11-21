@@ -456,9 +456,11 @@ fun Desktop(
             modifier = Modifier.matchParentSize(),
         )
         Column(
-            // System bars are hidden in immersive mode; reserve only display cutout, caption bar, and IME insets.
+            // System bars are hidden in immersive mode; reserve display cutout and caption bar only.
+            // Do not shrink the desktop work area with IME insets, or every open app window/VirtualDisplay
+            // would resize on every frame of the soft keyboard animation.
             Modifier.fillMaxSize()
-                .windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.captionBar).union(WindowInsets.ime))
+                .windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.captionBar))
                 .onPreviewKeyEvent { e ->
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when {
@@ -765,6 +767,7 @@ fun Desktop(
                             onUninstallApp = uninstallApp,
                             focusSearchOnOpen = focusSearchOnOpen,
                             modifier = Modifier.align(if (floatingCentered) Alignment.BottomCenter else Alignment.BottomStart)
+                                .imePadding()
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                         )
                     }

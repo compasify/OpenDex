@@ -50,6 +50,7 @@ class WorkspaceRuntime private constructor(appContext: Context) {
     private val generationCounter = AtomicLong(0L)
     private val activeSurfaceGen = ConcurrentHashMap<String, Long>()
     private val lastSurfaceSize = ConcurrentHashMap<String, Pair<Int, Int>>()
+    private val pendingResizeTarget = ConcurrentHashMap<String, Triple<Int, Int, Int>>()
     private val pendingLaunchActions = ConcurrentHashMap<String, Pair<String, String?>>()
 
     private fun flowFor(external: Boolean): MutableStateFlow<List<AppWindowState>> =
@@ -176,6 +177,7 @@ class WorkspaceRuntime private constructor(appContext: Context) {
         zOrder.update { list -> list.filterNot { it == WindowKey.AppKey(appId) } }
         activeSurfaceGen.remove(appId)
         lastSurfaceSize.remove(appId)
+        pendingResizeTarget.remove(appId)
         pendingLaunchActions.remove(appId)
         persistAppWindows(external, updated)
         val displayId = removed.virtualDisplayId
@@ -198,6 +200,7 @@ class WorkspaceRuntime private constructor(appContext: Context) {
         current.forEach {
             activeSurfaceGen.remove(it.appId)
             lastSurfaceSize.remove(it.appId)
+            pendingResizeTarget.remove(it.appId)
             pendingLaunchActions.remove(it.appId)
         }
         if (persist) persistAppWindows(external, emptyList())
@@ -286,10 +289,14 @@ class WorkspaceRuntime private constructor(appContext: Context) {
         densityDpi: Int,
         onComplete: () -> Unit = {},
     ) {
+        val target = Triple(width, height, densityDpi)
         lastSurfaceSize[appId] = width to height
+        pendingResizeTarget[appId] = target
         scope.launch {
             try {
                 lockFor(appId).withLock {
+                    // Coalesce rapid resizes so stale intermediate sizes never queue up behind the shell lock.
+                    if (pendingResizeTarget[appId] != target) return@withLock
                     val displayId = flowFor(external).value.firstOrNull { it.appId == appId }?.virtualDisplayId
                         ?: return@withLock
                     if (displayId == NO_VIRTUAL_DISPLAY) return@withLock
