@@ -45,6 +45,9 @@ class ExternalInputController(
     private val _pointerState = MutableStateFlow(ExternalPointerState())
     val pointerState: StateFlow<ExternalPointerState> = _pointerState.asStateFlow()
 
+    private val _activeExternalDisplayId = MutableStateFlow(Display.INVALID_DISPLAY)
+    val activeExternalDisplayId: StateFlow<Int> = _activeExternalDisplayId.asStateFlow()
+
     @Volatile private var hostRef: WeakReference<Activity>? = null
     @Volatile private var hostDisplayId: Int = Display.INVALID_DISPLAY
     @Volatile private var targetDisplayId: Int = Display.INVALID_DISPLAY
@@ -58,6 +61,7 @@ class ExternalInputController(
         if (displayId == Display.DEFAULT_DISPLAY || displayId == Display.INVALID_DISPLAY) return
         hostRef = WeakReference(activity)
         hostDisplayId = displayId
+        _activeExternalDisplayId.value = displayId
         if (widthPx > 0 && heightPx > 0 && (targetDisplayId == displayId || targetDisplayId == Display.INVALID_DISPLAY)) {
             targetWidthPx = widthPx
             targetHeightPx = heightPx
@@ -77,7 +81,24 @@ class ExternalInputController(
         if (hostRef?.get() === activity) {
             hostRef = null
             hostDisplayId = Display.INVALID_DISPLAY
+            _activeExternalDisplayId.value = Display.INVALID_DISPLAY
         }
+    }
+
+    fun closeExternalHost(displayId: Int): Boolean {
+        hidePointer()
+        setSuppressSystemIme(false)
+        val host = hostRef?.get()?.takeIf { !it.isFinishing && !it.isDestroyed && hostDisplayId == displayId }
+            ?: return false
+        hostRef = null
+        hostDisplayId = Display.INVALID_DISPLAY
+        _activeExternalDisplayId.value = Display.INVALID_DISPLAY
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            host.finishAndRemoveTask()
+        } else {
+            mainHandler.post { if (!host.isFinishing && !host.isDestroyed) host.finishAndRemoveTask() }
+        }
+        return true
     }
 
     fun activateTarget(displayId: Int, widthPx: Int, heightPx: Int) {

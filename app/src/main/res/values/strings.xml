@@ -166,7 +166,8 @@
     <string name="not_supported">not supported</string>
     <string name="reported_features_notice">Reported features do not confirm app placement or window mode. Android and the device software manage other apps.</string>
     <string name="display_details">#%1$d · %2$s · %3$d × %4$d px</string>
-    <string name="test_display">Try opening OpenDex on display #%1$d</string>
+    <string name="test_display">Open OpenDex on display #%1$d</string>
+    <string name="disconnect_external_display">Disconnect</string>
     <string name="dex_tip">If the external display has its own desktop, you can also open OpenDex from its system app launcher.</string>
     <string name="external_displays">External displays</string>
     <string name="no_external_display">Android hasn’t reported a separate display. If the system is only mirroring, OpenDex uses the same window as on the main display.</string>
@@ -188,6 +189,8 @@
     <string name="touchpad_left_click">Left click</string>
     <string name="touchpad_right_click">Right click</string>
     <string name="touchpad_pointer_speed">Pointer speed / DPI</string>
+    <string name="touchpad_blackout">Dim device screen (keep external awake)</string>
+    <string name="touchpad_blackout_hint">External display staying awake · Double-tap to wake controls</string>
     <plurals name="result_count">
         <item quantity="one">%1$d result</item>
         <item quantity="other">%1$d results</item>

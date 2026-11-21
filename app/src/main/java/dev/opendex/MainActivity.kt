@@ -12,6 +12,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
 import android.view.ViewTreeObserver
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -64,6 +65,7 @@ class MainActivity : ComponentActivity() {
     private var capabilities by mutableStateOf(DesktopCapabilities())
     private var notificationAccessGranted by mutableStateOf(false)
     private var searchRequests by mutableIntStateOf(0)
+    private var savedScreenBrightness: Float? = null
     private val homeRequest = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { refresh() }
     private val wallpaperPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) model.importCustomWallpaper(uri)
@@ -128,6 +130,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onBrightnessChange = { fraction -> systemTray.setBrightness(fraction, window) },
                     onHideSystemBars = ::hideSystemBars,
+                    onKeepScreenOn = ::setKeepScreenOn,
+                    onDimScreen = ::setDimmed,
                     onMoveToBackground = { moveTaskToBack(true) },
                 ) {
                     runCatching { homeRequest.launch(desktop.homeIntent()) }.isSuccess
@@ -196,6 +200,27 @@ class MainActivity : ComponentActivity() {
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller.hide(WindowInsetsCompat.Type.systemBars())
+    }
+
+    private fun setKeepScreenOn(keepOn: Boolean) {
+        if (keepOn) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    private fun setDimmed(dimmed: Boolean) {
+        val lp = window.attributes
+        if (dimmed) {
+            if (savedScreenBrightness == null) savedScreenBrightness = lp.screenBrightness
+            lp.screenBrightness = 0.01f
+            window.attributes = lp
+        } else if (savedScreenBrightness != null) {
+            lp.screenBrightness = savedScreenBrightness!!
+            savedScreenBrightness = null
+            window.attributes = lp
+        }
     }
 
     private fun refresh() {
@@ -272,6 +297,8 @@ class WorkspaceModel(application: Application) : AndroidViewModel(application) {
 
     fun closeAllAppWindows(external: Boolean, persist: Boolean = true): Boolean =
         runtime.closeAllAppWindows(external, persist)
+
+    fun disconnectExternalDisplay(displayId: Int) = runtime.disconnectExternalDisplay(displayId)
 
     fun attachAppSurface(
         external: Boolean,

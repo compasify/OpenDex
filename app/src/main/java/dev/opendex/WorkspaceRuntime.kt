@@ -218,6 +218,11 @@ class WorkspaceRuntime private constructor(appContext: Context) {
         return true
     }
 
+    fun disconnectExternalDisplay(displayId: Int) {
+        closeAllAppWindows(external = true, persist = false)
+        externalInput.closeExternalHost(displayId)
+    }
+
     fun attachAppSurface(
         external: Boolean,
         app: InstalledApp,

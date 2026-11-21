@@ -23,6 +23,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -65,6 +66,7 @@ import dev.opendex.platform.ScreenInfo
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 
 private val SPEED_PRESETS = floatArrayOf(0.6f, 1.0f, 1.5f, 2.2f)
@@ -93,6 +95,7 @@ internal fun ExternalTouchpadScreen(
     controller: ExternalInputController,
     pointerSpeed: Float,
     onPointerSpeedChange: (Float) -> Unit,
+    onDimScreen: (Boolean) -> Unit = {},
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -101,6 +104,7 @@ internal fun ExternalTouchpadScreen(
     var liveSpeed by remember(pointerSpeed) { mutableFloatStateOf(pointerSpeed.coerceIn(0.4f, 3.0f)) }
     var speedMenuOpen by remember { mutableStateOf(false) }
     var keyboardOpen by remember { mutableStateOf(false) }
+    var blackoutMode by remember { mutableStateOf(false) }
     var pointerCaptured by remember { mutableStateOf(false) }
     var mouseDetected by remember { mutableStateOf(hasExternalMouseConnected()) }
     var hasInteracted by remember { mutableStateOf(false) }
@@ -124,8 +128,13 @@ internal fun ExternalTouchpadScreen(
         }
     }
 
+    LaunchedEffect(blackoutMode) {
+        onDimScreen(blackoutMode)
+    }
+
     DisposableEffect(Unit) {
         onDispose {
+            onDimScreen(false)
             controller.setSuppressSystemIme(false)
             touchpadViewRef?.let { view ->
                 if (view.hasPointerCapture()) view.releasePointerCapture()
@@ -135,7 +144,9 @@ internal fun ExternalTouchpadScreen(
     }
 
     BackHandler {
-        if (keyboardOpen) {
+        if (blackoutMode) {
+            blackoutMode = false
+        } else if (keyboardOpen) {
             keyboardOpen = false
             keyboardEditRef?.hideIme()
             touchpadViewRef?.requestFocus()
@@ -388,6 +399,23 @@ internal fun ExternalTouchpadScreen(
                     )
                 }
 
+                IconButton(
+                    onClick = {
+                        if (keyboardOpen) {
+                            keyboardOpen = false
+                            keyboardEditRef?.hideIme()
+                        }
+                        blackoutMode = true
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Bedtime,
+                        contentDescription = stringResource(R.string.touchpad_blackout),
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+
                 FilledTonalIconButton(
                     onClick = onExit,
                     modifier = Modifier.size(36.dp),
@@ -546,6 +574,36 @@ internal fun ExternalTouchpadScreen(
                 onInteracted = { hasInteracted = true },
             )
         }
+        }
+
+        if (blackoutMode) {
+            var showBlackoutHint by remember { mutableStateOf(true) }
+            LaunchedEffect(showBlackoutHint) {
+                if (showBlackoutHint) {
+                    delay(3500L)
+                    showBlackoutHint = false
+                }
+            }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = { showBlackoutHint = true },
+                            onDoubleTap = { blackoutMode = false },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (showBlackoutHint) {
+                    Text(
+                        stringResource(R.string.touchpad_blackout_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.45f),
+                    )
+                }
+            }
         }
     }
 }

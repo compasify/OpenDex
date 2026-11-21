@@ -119,6 +119,8 @@ fun Desktop(
     onRequestLocationPermission: () -> Unit = {},
     onBrightnessChange: (Float) -> Unit = {},
     onHideSystemBars: () -> Unit = {},
+    onKeepScreenOn: (Boolean) -> Unit = {},
+    onDimScreen: (Boolean) -> Unit = {},
     onMoveToBackground: () -> Unit = {},
     changeHome: () -> Boolean,
 ) {
@@ -144,11 +146,19 @@ fun Desktop(
         }
     }
     if (activeTouchpadScreen != null) {
+        DisposableEffect(Unit) {
+            onKeepScreenOn(true)
+            onDispose {
+                onDimScreen(false)
+                onKeepScreenOn(false)
+            }
+        }
         ExternalTouchpadScreen(
             screen = activeTouchpadScreen,
             controller = model.externalInput,
             pointerSpeed = preferences.pointerSpeed,
             onPointerSpeedChange = { speed -> model.save { pointerSpeed(speed) } },
+            onDimScreen = onDimScreen,
             onExit = { touchpadTargetDisplayId = null },
         )
         return
@@ -161,6 +171,7 @@ fun Desktop(
     val storedWindows = remember(serialized) { decodeWindows(serialized) }
     val appWindows by remember(model, layoutIsExternal) { model.appWindows(layoutIsExternal) }
         .collectAsStateWithLifecycle()
+    val activeExternalDisplayId by model.externalInput.activeExternalDisplayId.collectAsStateWithLifecycle()
 
     val customWallpaperBitmap by produceState<ImageBitmap?>(initialValue = null, preferences.customWallpaperPath) {
         value = WallpaperStorage.loadBitmap(preferences.customWallpaperPath)
@@ -457,6 +468,11 @@ fun Desktop(
     val activeKey = orderedKeys.lastOrNull()
     val fullscreenApp = visibleApps.lastOrNull { it.fullscreen }
     val isImmersive = fullscreenApp != null
+    val keepAwake = external || isImmersive || externalScreens.isNotEmpty()
+    DisposableEffect(keepAwake) {
+        onKeepScreenOn(keepAwake)
+        onDispose { onKeepScreenOn(false) }
+    }
     LaunchedEffect(isImmersive) {
         if (isImmersive) {
             closePopovers()
@@ -745,6 +761,11 @@ fun Desktop(
                                                 },
                                                 onTouchpad = { id ->
                                                     if (!external) touchpadTargetDisplayId = id
+                                                },
+                                                activeExternalDisplayId = activeExternalDisplayId,
+                                                onDisconnectExternal = { id ->
+                                                    if (touchpadTargetDisplayId == id) touchpadTargetDisplayId = null
+                                                    model.disconnectExternalDisplay(id)
                                                 },
                                             )
                                         }

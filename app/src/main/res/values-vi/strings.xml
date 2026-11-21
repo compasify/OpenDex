@@ -164,7 +164,8 @@
     <string name="not_supported">không được hỗ trợ</string>
     <string name="reported_features_notice">Thông tin trên không xác nhận ứng dụng sẽ mở ở đâu hay ở chế độ cửa sổ nào. Android và phần mềm của thiết bị quản lý các ứng dụng bên ngoài.</string>
     <string name="display_details">#%1$d · %2$s · %3$d × %4$d px</string>
-    <string name="test_display">Thử mở OpenDex trên màn hình #%1$d</string>
+    <string name="test_display">Mở OpenDex trên màn hình #%1$d</string>
+    <string name="disconnect_external_display">Ngắt kết nối</string>
     <string name="dex_tip">Nếu màn hình ngoài có phiên máy tính riêng, bạn cũng có thể mở OpenDex từ danh sách ứng dụng hệ thống trên màn hình đó.</string>
     <string name="external_displays">Màn hình ngoài</string>
     <string name="no_external_display">Android chưa nhận diện màn hình riêng. Nếu hệ thống chỉ phản chiếu, OpenDex dùng cùng cửa sổ như trên màn hình chính.</string>
@@ -186,6 +187,8 @@
     <string name="touchpad_left_click">Nhấp trái</string>
     <string name="touchpad_right_click">Nhấp phải</string>
     <string name="touchpad_pointer_speed">Tốc độ chuột / DPI</string>
+    <string name="touchpad_blackout">Làm tối màn hình máy (giữ màn ngoài sáng)</string>
+    <string name="touchpad_blackout_hint">Màn hình ngoài đang được giữ sáng · Chạm đúp để bật lại điều khiển</string>
     <plurals name="result_count">
         <item quantity="one">%1$d kết quả</item>
         <item quantity="other">%1$d kết quả</item>

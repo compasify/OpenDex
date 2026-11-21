@@ -537,6 +537,8 @@ internal fun SettingsPanel(
     onHome: () -> Unit,
     onScreen: (Int) -> Unit,
     onTouchpad: (Int) -> Unit = {},
+    activeExternalDisplayId: Int = Display.INVALID_DISPLAY,
+    onDisconnectExternal: (Int) -> Unit = {},
 ) {
     val secondary = MaterialTheme.colorScheme.onSurfaceVariant
     val dark = isThemeDark(preferences.theme)
@@ -641,7 +643,7 @@ internal fun SettingsPanel(
         }
 
         SettingsCard(title = R.string.external_displays) {
-            ConnectedDisplays(caps, onScreen, onTouchpad)
+            ConnectedDisplays(caps, onScreen, onTouchpad, activeExternalDisplayId, onDisconnectExternal)
         }
     }
 }
@@ -985,42 +987,56 @@ private fun AdbAccessPanel(access: AdbAccess, onPermission: () -> Unit) {
     if (access == AdbAccess.NeedsPermission) OutlinedButton(onClick = onPermission) { Text(stringResource(R.string.adb_grant)) }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ConnectedDisplays(
     caps: DesktopCapabilities,
     onScreen: (Int) -> Unit,
     onTouchpad: (Int) -> Unit = {},
+    activeExternalDisplayId: Int = Display.INVALID_DISPLAY,
+    onDisconnectExternal: (Int) -> Unit = {},
 ) {
-    val secondary = MaterialTheme.colorScheme.onSurfaceVariant
+    val colors = MaterialTheme.colorScheme
+    val secondary = colors.onSurfaceVariant
     val screens = caps.screens.filterNot { it.id == Display.DEFAULT_DISPLAY }
     if (screens.isEmpty()) Text(stringResource(R.string.no_external_display), style = MaterialTheme.typography.bodySmall, color = secondary)
     screens.forEach { screen ->
+        val runningOnScreen = screen.id == caps.currentDisplay || screen.id == activeExternalDisplayId
         Text(stringResource(R.string.display_details, screen.id, screen.name, screen.width, screen.height),
             style = MaterialTheme.typography.bodySmall, color = secondary)
-        when {
-            screen.id == caps.currentDisplay -> Text(stringResource(R.string.display_current), style = MaterialTheme.typography.bodySmall, color = secondary)
-            else -> {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (screen.canOpenWorkspace) {
-                        OutlinedButton(onClick = { onScreen(screen.id) }) {
-                            Text(stringResource(R.string.test_display, screen.id))
-                        }
-                    }
-                    if (!caps.external) {
-                        FilledTonalButton(onClick = { onTouchpad(screen.id) }) {
-                            Icon(Icons.Default.TouchApp, null, Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(stringResource(R.string.open_touchpad_mode))
-                        }
-                    }
-                }
-                if (!screen.canOpenWorkspace) {
-                    Text(stringResource(R.string.display_direct_launch_unavailable), style = MaterialTheme.typography.bodySmall, color = secondary)
+        if (screen.id == caps.currentDisplay) {
+            Text(stringResource(R.string.display_current), style = MaterialTheme.typography.bodySmall, color = secondary)
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (!runningOnScreen && screen.canOpenWorkspace) {
+                OutlinedButton(onClick = { onScreen(screen.id) }) {
+                    Text(stringResource(R.string.test_display, screen.id))
                 }
             }
+            if (!caps.external) {
+                FilledTonalButton(onClick = { onTouchpad(screen.id) }) {
+                    Icon(Icons.Default.TouchApp, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.open_touchpad_mode))
+                }
+            }
+            if (runningOnScreen) {
+                OutlinedButton(
+                    onClick = { onDisconnectExternal(screen.id) },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.error),
+                    border = BorderStroke(1.dp, colors.error.copy(alpha = 0.6f)),
+                ) {
+                    Icon(Icons.Default.LinkOff, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.disconnect_external_display))
+                }
+            }
+        }
+        if (!runningOnScreen && !screen.canOpenWorkspace) {
+            Text(stringResource(R.string.display_direct_launch_unavailable), style = MaterialTheme.typography.bodySmall, color = secondary)
         }
     }
     Text(stringResource(R.string.dex_tip), style = MaterialTheme.typography.labelSmall, color = secondary)
