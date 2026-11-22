@@ -79,6 +79,11 @@
     <string name="display_scale_default">Mặc định</string>
     <string name="display_scale_large">Lớn</string>
     <string name="display_scale_larger">Rất lớn</string>
+    <string name="external_overscan_title">Viền an toàn màn hình ngoài (Overscan)</string>
+    <string name="external_overscan_desc">Thu gọn 4 cạnh trên màn hình ngoài hoặc tivi nếu cổng HDMI bị cắt mất thanh tác vụ hoặc viền cửa sổ.</string>
+    <string name="external_overscan_off">Tắt</string>
+    <string name="external_overscan_reset">Đặt lại</string>
+    <string name="external_overscan_badge">Màn hình ngoài</string>
     <string name="window_scale">Tỉ lệ cửa sổ ứng dụng</string>
     <string name="scale_compact">Gọn</string>
     <string name="scale_standard">Tiêu chuẩn</string>

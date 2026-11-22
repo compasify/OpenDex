@@ -57,6 +57,7 @@ import dev.opendex.data.ThemeMode
 import dev.opendex.data.WallpaperStorage
 import dev.opendex.data.WorkspacePreferences
 import dev.opendex.data.computeHostedDensityDpi
+import dev.opendex.data.computeOverscanInsetPx
 import dev.opendex.data.scaledDensity
 import dev.opendex.platform.AdbAccess
 import dev.opendex.platform.AdbWindows
@@ -292,6 +293,20 @@ fun Desktop(
     }
     val activeDockHeightDp = dockHeightPreviewDp ?: savedDockHeightDp
 
+    val savedExternalOverscanPercent = preferences.externalOverscanPercent
+    var externalOverscanPreview by remember(external) { mutableStateOf<Int?>(null) }
+    var adjustingExternalOverscan by remember(external) { mutableStateOf(false) }
+    LaunchedEffect(savedExternalOverscanPercent) {
+        if (externalOverscanPreview == savedExternalOverscanPercent) externalOverscanPreview = null
+    }
+    val activeExternalOverscanPercent = externalOverscanPreview ?: savedExternalOverscanPercent
+    val (overscanPadXPx, overscanPadYPx) = remember(external, physicalSizePx, activeExternalOverscanPercent) {
+        if (external) computeOverscanInsetPx(physicalSizePx.width, physicalSizePx.height, activeExternalOverscanPercent)
+        else 0 to 0
+    }
+    val overscanPadX = with(effectiveDensity) { overscanPadXPx.toDp() }
+    val overscanPadY = with(effectiveDensity) { overscanPadYPx.toDp() }
+
     var hadAdbGranted by remember { mutableStateOf(adbAccess == AdbAccess.Granted) }
     LaunchedEffect(adbAccess) {
         if (adbAccess == AdbAccess.Granted) {
@@ -524,6 +539,16 @@ fun Desktop(
             // or every open app window/VirtualDisplay would resize on every frame of the soft keyboard animation.
             Modifier.fillMaxSize()
                 .then(
+                    if (external && (overscanPadXPx > 0 || overscanPadYPx > 0)) {
+                        Modifier.padding(horizontal = overscanPadX, vertical = overscanPadY)
+                    } else Modifier,
+                )
+                .then(
+                    if (external && adjustingExternalOverscan) {
+                        Modifier.border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.85f))
+                    } else Modifier,
+                )
+                .then(
                     if (isImmersive) Modifier
                     else Modifier.windowInsetsPadding(WindowInsets.displayCutout.union(WindowInsets.captionBar)),
                 )
@@ -745,6 +770,19 @@ fun Desktop(
                                                     if (!onPickWallpaper()) notice = Notice(R.string.wallpaper_picker_unavailable)
                                                 },
                                                 onDisplayScale = { scale -> model.save { displayScale(external, scale) } },
+                                                externalOverscanPercent = activeExternalOverscanPercent,
+                                                onExternalOverscanPreview = { percent ->
+                                                    adjustingExternalOverscan = true
+                                                    externalOverscanPreview = percent
+                                                    if (!external && percent != savedExternalOverscanPercent) {
+                                                        model.save { externalOverscan(percent) }
+                                                    }
+                                                },
+                                                onExternalOverscanCommit = { percent ->
+                                                    adjustingExternalOverscan = false
+                                                    externalOverscanPreview = if (percent == savedExternalOverscanPercent) null else percent
+                                                    model.save { externalOverscan(percent) }
+                                                },
                                                 onDock = { model.save { dock(it) } },
                                                 dockHeightDp = activeDockHeightDp,
                                                 onDockHeightPreview = { dockHeightPreviewDp = it },

@@ -81,6 +81,12 @@
     <string name="display_scale_default">Default</string>
     <string name="display_scale_large">Large</string>
     <string name="display_scale_larger">Larger</string>
+    <string name="external_overscan_title">External display safe area (Overscan)</string>
+    <string name="external_overscan_desc">Shrink the 4 edges on external displays or TVs if HDMI overscan cuts off the taskbar or window borders.</string>
+    <string name="external_overscan_value" translatable="false">%1$d%%</string>
+    <string name="external_overscan_off">Off</string>
+    <string name="external_overscan_reset">Reset</string>
+    <string name="external_overscan_badge">External display</string>
     <string name="window_scale">App window scale</string>
     <string name="scale_compact">Compact</string>
     <string name="scale_standard">Standard</string>

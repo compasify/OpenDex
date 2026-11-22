@@ -1,15 +1,18 @@
 package dev.opendex.desktop
 
 import dev.opendex.data.DEFAULT_EXTERNAL_DOCK_HEIGHT_DP
+import dev.opendex.data.DEFAULT_EXTERNAL_OVERSCAN_PERCENT
 import dev.opendex.data.DEFAULT_LOCAL_DOCK_HEIGHT_DP
 import dev.opendex.data.DisplayScale
 import dev.opendex.data.MAX_DOCK_HEIGHT_DP
+import dev.opendex.data.MAX_OVERSCAN_PERCENT
 import dev.opendex.data.MIN_DOCK_HEIGHT_DP
 import dev.opendex.data.WindowResizeMode
 import dev.opendex.data.WindowScale
 import dev.opendex.data.WorkspacePreferences
 import dev.opendex.data.computeDockMetrics
 import dev.opendex.data.computeHostedDensityDpi
+import dev.opendex.data.computeOverscanInsetPx
 import dev.opendex.data.defaultDockHeightDp
 import dev.opendex.data.logicalResolution
 import dev.opendex.platform.cleanWifiSsid
@@ -325,6 +328,20 @@ class WorkspaceTest {
         assertEquals(
             emptyList<ExternalLaunchMethod>(),
             resolveExternalLaunchOrder(canLaunchActivity = false, canPresent = false, adbGranted = false),
+        )
+    }
+
+    @Test fun externalOverscanInsetsScaleProportionallyAndClamp() {
+        assertEquals(DEFAULT_EXTERNAL_OVERSCAN_PERCENT, WorkspacePreferences().externalOverscanPercent)
+        assertEquals(0 to 0, computeOverscanInsetPx(1920, 1080, 0))
+        assertEquals(0 to 0, computeOverscanInsetPx(1920, 1080, -3))
+        assertEquals(0 to 0, computeOverscanInsetPx(0, 1080, 5))
+        assertEquals(77 to 43, computeOverscanInsetPx(1920, 1080, 4))
+        assertEquals(164 to 86, computeOverscanInsetPx(4096, 2160, 4))
+        // Values above MAX_OVERSCAN_PERCENT clamp cleanly to MAX_OVERSCAN_PERCENT.
+        assertEquals(
+            computeOverscanInsetPx(1920, 1080, MAX_OVERSCAN_PERCENT),
+            computeOverscanInsetPx(1920, 1080, 50),
         )
     }
 }

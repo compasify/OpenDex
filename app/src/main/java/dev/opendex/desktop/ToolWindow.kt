@@ -55,11 +55,14 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.opendex.R
+import dev.opendex.data.DEFAULT_EXTERNAL_OVERSCAN_PERCENT
 import dev.opendex.data.DisplayScale
 import dev.opendex.data.DockAlignment
 import dev.opendex.data.DockStyle
 import dev.opendex.data.MAX_DOCK_HEIGHT_DP
+import dev.opendex.data.MAX_OVERSCAN_PERCENT
 import dev.opendex.data.MIN_DOCK_HEIGHT_DP
+import dev.opendex.data.MIN_OVERSCAN_PERCENT
 import dev.opendex.data.ThemeMode
 import dev.opendex.data.Wallpaper
 import dev.opendex.data.WindowResizeMode
@@ -526,6 +529,9 @@ internal fun SettingsPanel(
     onWallpaper: (Wallpaper) -> Unit,
     onPickWallpaper: () -> Unit,
     onDisplayScale: (DisplayScale) -> Unit,
+    externalOverscanPercent: Int = DEFAULT_EXTERNAL_OVERSCAN_PERCENT,
+    onExternalOverscanPreview: (Int) -> Unit = {},
+    onExternalOverscanCommit: (Int) -> Unit = {},
     onDock: (DockStyle) -> Unit,
     dockHeightDp: Int,
     onDockHeightPreview: (Int) -> Unit,
@@ -561,6 +567,13 @@ internal fun SettingsPanel(
                 nativeDensity = nativeDensity,
                 onSelect = onDisplayScale,
             )
+            if (caps.external || caps.screens.any { it.id != Display.DEFAULT_DISPLAY } || externalOverscanPercent > 0) {
+                ExternalOverscanSlider(
+                    overscanPercent = externalOverscanPercent,
+                    onPreview = onExternalOverscanPreview,
+                    onCommit = onExternalOverscanCommit,
+                )
+            }
             ChoiceChipRow(R.string.window_scale, WindowScale.entries, preferences.windowScale, WindowScale::label, onWindowScale)
         }
 
@@ -807,6 +820,108 @@ private fun WallpaperSwatch(
             color = if (selected) colors.primary else colors.onSurfaceVariant,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         )
+    }
+}
+
+@Composable
+private fun ExternalOverscanSlider(
+    overscanPercent: Int,
+    onPreview: (Int) -> Unit,
+    onCommit: (Int) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    var sliderValue by remember { mutableFloatStateOf(overscanPercent.toFloat()) }
+    LaunchedEffect(overscanPercent) {
+        if (sliderValue.roundToInt() != overscanPercent) {
+            sliderValue = overscanPercent.toFloat()
+        }
+    }
+    val livePercent = sliderValue.roundToInt().coerceIn(MIN_OVERSCAN_PERCENT, MAX_OVERSCAN_PERCENT)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.external_overscan_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Text(
+                    if (livePercent == 0) stringResource(R.string.external_overscan_off)
+                    else stringResource(R.string.external_overscan_value, livePercent),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.primary,
+                )
+            }
+            if (livePercent != DEFAULT_EXTERNAL_OVERSCAN_PERCENT) {
+                TextButton(
+                    onClick = {
+                        sliderValue = DEFAULT_EXTERNAL_OVERSCAN_PERCENT.toFloat()
+                        onCommit(DEFAULT_EXTERNAL_OVERSCAN_PERCENT)
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(26.dp),
+                ) {
+                    Text(stringResource(R.string.external_overscan_reset), style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = colors.secondaryContainer.copy(alpha = 0.7f),
+            ) {
+                Text(
+                    stringResource(R.string.external_overscan_badge),
+                    Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSecondaryContainer,
+                )
+            }
+        }
+        Text(
+            stringResource(R.string.external_overscan_desc),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.onSurfaceVariant,
+        )
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                stringResource(R.string.external_overscan_value, MIN_OVERSCAN_PERCENT),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+            )
+            Slider(
+                value = sliderValue,
+                onValueChange = {
+                    sliderValue = it
+                    onPreview(it.roundToInt().coerceIn(MIN_OVERSCAN_PERCENT, MAX_OVERSCAN_PERCENT))
+                },
+                onValueChangeFinished = {
+                    onCommit(sliderValue.roundToInt().coerceIn(MIN_OVERSCAN_PERCENT, MAX_OVERSCAN_PERCENT))
+                },
+                valueRange = MIN_OVERSCAN_PERCENT.toFloat()..MAX_OVERSCAN_PERCENT.toFloat(),
+                steps = (MAX_OVERSCAN_PERCENT - MIN_OVERSCAN_PERCENT - 1).coerceAtLeast(0),
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                stringResource(R.string.external_overscan_value, MAX_OVERSCAN_PERCENT),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
     }
 }
 

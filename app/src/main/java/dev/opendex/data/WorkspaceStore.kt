@@ -50,6 +50,22 @@ const val MAX_DOCK_HEIGHT_DP = 68
 const val DEFAULT_LOCAL_DOCK_HEIGHT_DP = 52
 const val DEFAULT_EXTERNAL_DOCK_HEIGHT_DP = 40
 
+const val MIN_OVERSCAN_PERCENT = 0
+const val MAX_OVERSCAN_PERCENT = 12
+const val DEFAULT_EXTERNAL_OVERSCAN_PERCENT = 0
+
+internal fun computeOverscanInsetPx(
+    physicalWidthPx: Int,
+    physicalHeightPx: Int,
+    percent: Int,
+): Pair<Int, Int> {
+    val clamped = percent.coerceIn(MIN_OVERSCAN_PERCENT, MAX_OVERSCAN_PERCENT)
+    if (clamped <= 0 || physicalWidthPx <= 0 || physicalHeightPx <= 0) return 0 to 0
+    val padX = (physicalWidthPx * clamped / 100f).roundToInt().coerceAtMost(physicalWidthPx / 4)
+    val padY = (physicalHeightPx * clamped / 100f).roundToInt().coerceAtMost(physicalHeightPx / 4)
+    return padX to padY
+}
+
 internal fun defaultDockHeightDp(external: Boolean): Int =
     if (external) DEFAULT_EXTERNAL_DOCK_HEIGHT_DP else DEFAULT_LOCAL_DOCK_HEIGHT_DP
 
@@ -166,6 +182,7 @@ data class WorkspacePreferences(
     val showDesktopShortcuts: Boolean = true,
     val localDisplayScale: DisplayScale = DisplayScale.Default,
     val externalDisplayScale: DisplayScale = DisplayScale.Default,
+    val externalOverscanPercent: Int = DEFAULT_EXTERNAL_OVERSCAN_PERCENT,
     val windowScale: WindowScale = WindowScale.Standard,
     val windowResizeMode: WindowResizeMode = WindowResizeMode.Live,
     val restoreOpenApps: Boolean = true,
@@ -201,6 +218,7 @@ class WorkspaceStore(context: Context) {
     private val showDesktopShortcuts = booleanPreferencesKey("show_desktop_shortcuts")
     private val localDisplayScale = stringPreferencesKey("local_display_scale")
     private val externalDisplayScale = stringPreferencesKey("external_display_scale")
+    private val externalOverscanPercent = intPreferencesKey("external_overscan_percent")
     private val windowScale = stringPreferencesKey("window_scale")
     private val windowResizeMode = stringPreferencesKey("window_resize_mode")
     private val restoreOpenApps = booleanPreferencesKey("restore_open_apps")
@@ -238,6 +256,8 @@ class WorkspaceStore(context: Context) {
             showDesktopShortcuts = p[showDesktopShortcuts] ?: true,
             localDisplayScale = DisplayScale.entries.find { it.name == p[localDisplayScale] } ?: DisplayScale.Default,
             externalDisplayScale = DisplayScale.entries.find { it.name == p[externalDisplayScale] } ?: DisplayScale.Default,
+            externalOverscanPercent = (p[externalOverscanPercent] ?: DEFAULT_EXTERNAL_OVERSCAN_PERCENT)
+                .coerceIn(MIN_OVERSCAN_PERCENT, MAX_OVERSCAN_PERCENT),
             windowScale = WindowScale.entries.find { it.name == p[windowScale] } ?: WindowScale.Standard,
             windowResizeMode = WindowResizeMode.entries.find { it.name == p[windowResizeMode] } ?: WindowResizeMode.Live,
             restoreOpenApps = p[restoreOpenApps] ?: true,
@@ -275,6 +295,9 @@ class WorkspaceStore(context: Context) {
     suspend fun showDesktopShortcuts(value: Boolean) = store.edit { it[showDesktopShortcuts] = value }
     suspend fun displayScale(external: Boolean, value: DisplayScale) = store.edit {
         it[if (external) externalDisplayScale else localDisplayScale] = value.name
+    }
+    suspend fun externalOverscan(percent: Int) = store.edit {
+        it[externalOverscanPercent] = percent.coerceIn(MIN_OVERSCAN_PERCENT, MAX_OVERSCAN_PERCENT)
     }
     suspend fun windowScale(value: WindowScale) = store.edit { it[windowScale] = value.name }
     suspend fun windowResizeMode(value: WindowResizeMode) = store.edit { it[windowResizeMode] = value.name }
