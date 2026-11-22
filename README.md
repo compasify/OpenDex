@@ -7,13 +7,14 @@
 [![Platform](https://img.shields.io/badge/Platform-Android%2010%2B%20(API%2029%2B)-3DDC84?logo=android&logoColor=white)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.x-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose%20(Material%203)-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/compose)
-[![No Root Required](https://img.shields.io/badge/Root-Không%20cần%20Root-success)](#tính-năng-đa-nhiệm-cửa-sổ-với-shizuku-adb)
+[![No Root Required](https://img.shields.io/badge/Root-Không%20cần%20Root-success)](#2-tùy-chọn-đa-nhiệm-cửa-sổ-thực-thụ-không-cần-root)
 [![i18n](https://img.shields.io/badge/Ngôn%20ngữ-English%20%7C%20Tiếng%20Việt-orange)](#đa-ngôn-ngữ-i18n)
 
 [Tính năng & Ảnh chụp màn hình](#-tổng-quan-tính-năng--ảnh-chụp-màn-hình) •
 [Mục tiêu hiển thị](#-hỗ-trợ-mọi-màn-hình) •
 [Phím tắt & Điều khiển](#-phím-tắt--điều-khiển) •
 [Cài đặt & Sử dụng](#-cài-đặt--hướng-dẫn-sử-dụng) •
+[Dành cho nhà phát triển](#-dành-cho-nhà-phát-triển-build-từ-mã-nguồn) •
 [Kiến trúc & Công nghệ](#-công-nghệ--kiến-trúc) •
 [Đóng góp](#-đóng-góp-open-source)
 
@@ -90,10 +91,72 @@ OpenDex hỗ trợ song song **Chuột + Bàn phím**, **Cảm ứng** và **Tou
 
 ## 🚀 Cài đặt & Hướng dẫn sử dụng
 
-### 1. Yêu cầu hệ thống & Build từ mã nguồn
+Phần này dành cho **người dùng cuối** tải trực tiếp file APK phát hành về sử dụng trên điện thoại hoặc máy tính bảng Android (Android 10 trở lên).
 
-- **Thiết bị Android:** Android 10 trở lên (`minSdk 29`, `targetSdk 36`).
+### 1. Cài đặt & Sử dụng cơ bản (Không cần ADB / Shizuku)
+
+1. Tải tệp **OpenDex APK** mới nhất từ mục **Releases** trên GitHub về thiết bị Android của bạn.
+2. Mở tệp `.apk` vừa tải (nếu Android yêu cầu, hãy bật **Cho phép cài đặt ứng dụng từ nguồn này / Install unknown apps**).
+3. Mở **OpenDex** và sử dụng ngay:
+   - Toàn bộ không gian làm việc Desktop (**thanh Dock, Menu ứng dụng, tìm kiếm `Ctrl + K`, Ghim ứng dụng, Ghi chú, Khay hệ thống, Lịch, xuất màn hình ngoài / Cast kèm Touchpad & Bàn phím ảo**) hoạt động đầy đủ mà **không cần Root hay ADB**.
+   - Ở chế độ cơ bản này, khi mở ứng dụng Android bên thứ ba, ứng dụng sẽ mở theo chế độ mặc định của hệ thống (toàn màn hình, hoặc cửa sổ nổi nếu thiết bị có sẵn chế độ Desktop/Freeform của hãng).
+
+### 2. Tùy chọn: Đa nhiệm cửa sổ thực thụ (Không cần Root)
+
+Nếu bạn muốn mở trực tiếp các ứng dụng Android **ngay bên trong cửa sổ Desktop của OpenDex** (có thanh tiêu đề, kéo thả, chia đôi màn hình, thay đổi kích thước và phóng toàn màn hình `F11`), bạn có thể chọn **1 trong 2 cách** dưới đây (đều **không cần Root**):
+
+#### Cách A: Chạy lệnh ADB trực tiếp từ máy tính (Không cần cài Shizuku)
+
+Phù hợp nếu bạn có máy tính cài sẵn [Android Platform Tools (`adb`)](https://developer.android.com/tools/releases/platform-tools) và không muốn cài thêm app Shizuku:
+
+1. Trên điện thoại/máy tính bảng: bật **Tùy chọn nhà phát triển (Developer options)** → bật **Gỡ lỗi USB (USB debugging)** rồi cắm cáp vào máy tính (chọn *Cho phép* nếu máy hiện hộp thoại xác nhận RSA).
+2. Mở Terminal / Command Prompt trên máy tính và chạy đúng **1 lệnh** sau:
+   - **macOS / Linux:**
+     ```bash
+     adb shell 'nohup sh -c "CLASSPATH=$(pm path dev.opendex | head -n 1 | cut -d: -f2) app_process /system/bin dev.opendex.platform.OpenDexShellServer" </dev/null >/dev/null 2>&1 &'
+     ```
+   - **Windows (Command Prompt / PowerShell):**
+     ```powershell
+     adb shell "nohup sh -c 'CLASSPATH=$(pm path dev.opendex | head -n 1 | cut -d: -f2) app_process /system/bin dev.opendex.platform.OpenDexShellServer' </dev/null >/dev/null 2>&1 &"
+     ```
+3. Rút cáp USB nếu muốn và mở **OpenDex** — đa nhiệm cửa sổ sẽ tự động sẵn sàng ngay lập tức (không cần bước cấp quyền bổ sung).
+   - *Tắt tiến trình nền thủ công khi không dùng nữa:* `adb shell pkill -f OpenDexShellServer`
+
+#### Cách B: Dùng Shizuku (Không cần máy tính trên Android 11+)
+
+Phù hợp nếu bạn muốn bật trực tiếp ngay trên điện thoại/máy tính bảng mà không cần máy tính:
+
+1. Tải và cài đặt ứng dụng [Shizuku (phiên bản 13 trở lên)](https://github.com/RikkaApps/Shizuku/releases).
+2. Bật **Tùy chọn nhà phát triển (Developer options)** và kích hoạt **Gỡ lỗi không dây (Wireless debugging)** *(cần kết nối Wi-Fi)*.
+3. Mở **Shizuku**, chọn **Ghép nối (Pairing)** theo hướng dẫn trên màn hình để khởi động Shizuku ở **chế độ ADB**.
+   - *(Hoặc nếu đang cắm cáp vào máy tính, có thể khởi động Shizuku nhanh bằng lệnh: `adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh`)*
+4. Mở **OpenDex**, vào **Cài đặt không gian làm việc → Ứng dụng cửa sổ nổi (ADB) → Cho phép qua Shizuku** và xác nhận cấp quyền.
+
+#### Cách dùng sau khi đã kích hoạt (áp dụng cho cả Cách A và Cách B)
+
+- **Chạm / Nhấp chuột trái** vào ứng dụng để mở trực tiếp trong cửa sổ Desktop của OpenDex.
+- **Nhấp chuột phải / Nhấn giữ** vào ứng dụng nếu muốn chọn mở toàn màn hình, ghim ra màn hình nền, xem thông tin ứng dụng...
+
+> **Lưu ý:** Cả 2 cách đều chỉ chạy trong phiên hiện tại — sau mỗi lần **khởi động lại (reboot)** thiết bị, bạn cần chạy lại lệnh ADB (Cách A) hoặc mở Shizuku nhấn **Khởi động** (Cách B). Nếu không bật, OpenDex vẫn hoạt động đầy đủ ở chế độ Desktop cơ bản.
+
+### 3. Quyền tùy chọn khác
+
+- **Trung tâm thông báo trên Taskbar:** Nhấp vào biểu tượng chuông thông báo trên Dock và chọn **Bật quyền truy cập thông báo** để hiển thị thông báo hệ thống ngay trên Desktop.
+- **Hiển thị tên mạng Wi-Fi (SSID):** Trong bảng Cài đặt nhanh, chọn **Hiện tên** và cấp quyền vị trí để Android cho phép hiển thị tên mạng Wi-Fi đang kết nối.
+- **Đặt làm Màn hình chính (Home Launcher):** Vào **Cài đặt không gian làm việc** và chọn đặt OpenDex làm trình khởi chạy mặc định nếu bạn muốn quay về OpenDex mỗi khi nhấn nút Home.
+
+---
+
+## 👨‍💻 Dành cho nhà phát triển (Build từ mã nguồn)
+
+Phần này dành cho lập trình viên muốn tự biên dịch, gỡ lỗi (debug) hoặc đóng góp mã nguồn cho OpenDex.
+
+### 1. Yêu cầu môi trường
+
+- **Thiết bị / Máy ảo kiểm thử:** Android 10 trở lên (`minSdk 29`, `targetSdk 36`).
 - **Môi trường Build:** Android SDK 36 và JDK 17 (hoặc JDK 21).
+
+### 2. Build bản Debug & Cài đặt qua ADB
 
 Mở dự án bằng **Android Studio** hoặc chạy lệnh sau trong thư mục gốc của dự án:
 
@@ -101,32 +164,21 @@ Mở dự án bằng **Android Studio** hoặc chạy lệnh sau trong thư mụ
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-File APK sau khi build sẽ nằm tại:
-`app/build/outputs/apk/debug/app-debug.apk`
-
-Cài đặt trực tiếp lên thiết bị qua ADB (hoặc chép file APK sang máy để cài):
+Tệp APK Debug sẽ nằm tại `app/build/outputs/apk/debug/app-debug.apk`. Cài đặt nhanh lên thiết bị đang kết nối ADB:
 
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 2. Tính năng đa nhiệm cửa sổ với Shizuku (ADB — Không cần Root)
+### 3. Build bản Release (Production APK)
 
-Bản dựng Debug của OpenDex hỗ trợ mở các ứng dụng Android tương thích bên trong **cửa sổ Desktop ngay trên workspace** (hoặc cửa sổ nổi Freeform của hệ thống) thông qua Shizuku mà **không cần Root máy**:
+```bash
+./gradlew :app:assembleRelease :app:testReleaseUnitTest
+```
 
-1. Cài đặt **APK Debug của OpenDex** và ứng dụng [Shizuku (phiên bản 13 trở lên)](https://github.com/RikkaApps/Shizuku/releases).
-2. Khởi động Shizuku ở **chế độ ADB** (thông qua *Gỡ lỗi không dây / Wireless debugging* ngay trên máy hoặc bằng lệnh ADB qua cáp USB).
-3. Mở OpenDex, vào **Cài đặt không gian làm việc → Ứng dụng cửa sổ nổi (ADB) → Cho phép qua Shizuku** và xác nhận cấp quyền.
-4. Khi đã cấp quyền:
-   - **Chạm / Nhấp chuột trái** vào ứng dụng để mở trực tiếp trong cửa sổ Desktop của OpenDex (có thanh tiêu đề, nút thu nhỏ, phóng to, đóng và kéo đổi kích thước).
-   - **Nhấp chuột phải / Nhấn giữ** vào ứng dụng nếu muốn chọn mở toàn màn hình hoặc các tùy chọn khác.
+Tệp APK Release sẽ nằm trong `app/build/outputs/apk/release/`. Khi phát hành cho người dùng cuối, hãy ký số (sign) tệp APK Release bằng keystore phát hành của bạn (qua Android Studio *Build → Generate Signed App Bundle / APK* hoặc cấu hình `signingConfigs` trong Gradle).
 
-> **Khi không dùng Shizuku hoặc dùng bản Release:** Các tính năng Desktop cốt lõi (thanh Dock, tìm kiếm, ghim ứng dụng, mở ứng dụng thông thường, cửa sổ Ghi chú, Cài đặt, Khay hệ thống, Thông báo, Lịch) vẫn hoạt động đầy đủ mà không cần bất kỳ quyền ADB nào.
-
-### 3. Trung tâm thông báo & Tên mạng Wi-Fi (Tùy chọn)
-
-- **Thông báo trên Taskbar:** Nhấp vào biểu tượng chuông thông báo trên Dock và chọn **Bật quyền truy cập thông báo** để cho phép OpenDex hiển thị thông báo hệ thống.
-- **Hiển thị tên Wi-Fi (SSID):** Trong bảng Cài đặt nhanh, chọn **Hiện tên** và cấp quyền vị trí nếu bạn muốn Android cho phép hiển thị tên mạng Wi-Fi đang kết nối.
+> Cả bản **Debug** và bản **Release** đều bao gồm sẵn cơ chế tích hợp Shizuku tùy chọn (opt-in) và hoạt động độc lập hoàn toàn khi thiết bị không cài Shizuku.
 
 ---
 
@@ -149,6 +201,12 @@ Trên Android 13+, bạn có thể chọn riêng ngôn ngữ Tiếng Anh hoặc 
   - Chạy Unit Tests & Lint: `./gradlew :app:testDebugUnitTest :app:lintDebug`
   - Chạy Compose UI Tests trên thiết bị/máy ảo: `./gradlew :app:connectedDebugAndroidTest`
   - Danh sách kiểm thử thực tế trên thiết bị: Xem chi tiết tại [`docs/device-compatibility.md`](docs/device-compatibility.md).
+
+---
+
+## 🔗 Dự án liên quan
+
+- **[AirDeck](https://github.com/compasify/AirDeck)** — Ứng dụng biến điện thoại hoặc máy tính bảng Android thành **bàn phím không dây, touchpad đa điểm, remote Smart TV, chuột bay (Air Mouse), bàn phím số và bút trình chiếu qua Bluetooth HID** — không cần cài app phụ hay server trên thiết bị đích. Rất lý tưởng để điều khiển Smart TV, PC hoặc màn hình ngoài đang chạy **OpenDex**.
 
 ---
 
