@@ -20,6 +20,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
 import androidx.compose.ui.unit.IntRect
+import dev.opendex.BuildConfig
 import dev.opendex.ExternalDisplayActivity
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
@@ -28,7 +29,11 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.system.exitProcess
 
+internal const val ROOT_UID = 0
 internal const val SHELL_UID = 2000
+
+internal fun isAuthorizedBackendUid(uid: Int): Boolean =
+    uid == SHELL_UID || (BuildConfig.ALLOW_ROOT_BACKEND && uid == ROOT_UID)
 internal const val FREEFORM_DESCRIPTOR = "dev.opendex.platform.FreeformShell"
 internal const val OPEN_FREEFORM = Binder.FIRST_CALL_TRANSACTION
 internal const val CREATE_DISPLAY = Binder.FIRST_CALL_TRANSACTION + 1
@@ -42,7 +47,7 @@ internal const val RELEASE_ALL_DISPLAYS = Binder.FIRST_CALL_TRANSACTION + 8
 internal const val LAUNCH_ACTION_ON_DISPLAY = Binder.FIRST_CALL_TRANSACTION + 9
 internal const val SET_SUPPRESS_IME = Binder.FIRST_CALL_TRANSACTION + 10
 internal const val LAUNCH_EXTERNAL_WORKSPACE = Binder.FIRST_CALL_TRANSACTION + 11
-private const val DESTROY_USER_SERVICE = 16777115
+internal const val DESTROY_USER_SERVICE = 16777115
 private const val PER_ANDROID_USER_UID_RANGE = 100_000
 
 private val ALLOWED_SETTINGS_ACTIONS = setOf(
@@ -83,8 +88,9 @@ class FreeformShellService(private val context: Context) : Binder() {
     )
 
     private val shellContext: Context by lazy {
+        val pkg = if (Process.myUid() == ROOT_UID) "android" else "com.android.shell"
         runCatching {
-            context.createPackageContext("com.android.shell", Context.CONTEXT_IGNORE_SECURITY)
+            context.createPackageContext(pkg, Context.CONTEXT_IGNORE_SECURITY)
         }.getOrElse { context }
     }
 
@@ -126,14 +132,14 @@ class FreeformShellService(private val context: Context) : Binder() {
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         val caller = Binder.getCallingUid()
-        if (code == DESTROY_USER_SERVICE && caller == SHELL_UID) {
+        if (code == DESTROY_USER_SERVICE && (isAuthorizedBackendUid(caller) || caller == ownerUid)) {
             releaseAllDisplays()
             exitProcess(0)
         }
         if (code !in OPEN_FREEFORM..LAUNCH_EXTERNAL_WORKSPACE || reply == null) {
             return super.onTransact(code, data, reply, flags)
         }
-        if (caller != ownerUid || Process.myUid() != SHELL_UID) throw SecurityException("Unexpected caller or backend")
+        if (caller != ownerUid || !isAuthorizedBackendUid(Process.myUid())) throw SecurityException("Unexpected caller or backend")
         data.enforceInterface(FREEFORM_DESCRIPTOR)
         when (code) {
             OPEN_FREEFORM -> {
@@ -471,7 +477,7 @@ class FreeformShellService(private val context: Context) : Binder() {
         }
     }
 
-    private fun releaseAllDisplays() {
+    internal fun releaseAllDisplays() {
         for (displayId in displays.keys.toList()) {
             releaseVirtualDisplay(displayId)
         }

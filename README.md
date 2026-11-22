@@ -93,17 +93,23 @@ OpenDex hỗ trợ song song **Chuột + Bàn phím**, **Cảm ứng** và **Tou
 
 Phần này dành cho **người dùng cuối** tải trực tiếp file APK phát hành về sử dụng trên điện thoại hoặc máy tính bảng Android (Android 10 trở lên).
 
-### 1. Cài đặt & Sử dụng cơ bản (Không cần ADB / Shizuku)
+### 1. Chọn bản APK & Cài đặt
 
-1. Tải tệp **OpenDex APK** mới nhất từ mục **Releases** trên GitHub về thiết bị Android của bạn.
-2. Mở tệp `.apk` vừa tải (nếu Android yêu cầu, hãy bật **Cho phép cài đặt ứng dụng từ nguồn này / Install unknown apps**).
-3. Mở **OpenDex** và sử dụng ngay:
-   - Toàn bộ không gian làm việc Desktop (**thanh Dock, Menu ứng dụng, tìm kiếm `Ctrl + K`, Ghim ứng dụng, Ghi chú, Khay hệ thống, Lịch, xuất màn hình ngoài / Cast kèm Touchpad & Bàn phím ảo**) hoạt động đầy đủ mà **không cần Root hay ADB**.
-   - Ở chế độ cơ bản này, khi mở ứng dụng Android bên thứ ba, ứng dụng sẽ mở theo chế độ mặc định của hệ thống (toàn màn hình, hoặc cửa sổ nổi nếu thiết bị có sẵn chế độ Desktop/Freeform của hãng).
+Tải tệp APK phù hợp từ mục **Releases** trên GitHub về thiết bị Android (Android 10 trở lên):
 
-### 2. Tùy chọn: Đa nhiệm cửa sổ thực thụ (Không cần Root)
+- **`OpenDex-vX.Y.Z-standard.apk` (Bản tiêu chuẩn — Khuyên dùng cho máy chưa Root):**
+  - Toàn bộ không gian làm việc Desktop (**thanh Dock, Menu ứng dụng, tìm kiếm `Ctrl + K`, Ghim ứng dụng, Ghi chú, Khay hệ thống, Lịch, xuất màn hình ngoài / Cast kèm Touchpad & Bàn phím ảo**) hoạt động đầy đủ ngay sau khi cài đặt mà **không cần Root hay ADB**.
+  - Hỗ trợ tùy chọn đa nhiệm cửa sổ qua **lệnh ADB trực tiếp** hoặc **Shizuku** (xem mục 2 bên dưới).
+- **`OpenDex-vX.Y.Z-root.apk` (Bản Root — Dành cho máy đã Root bằng Magisk / KernelSU / APatch):**
+  - **Không cần ADB, không cần máy tính, không cần cài Shizuku.**
+  - Chỉ cần mở **OpenDex Root** và nhấn **Cho phép (Grant)** quyền Superuser một lần duy nhất — đa nhiệm cửa sổ thực thụ tự động sẵn sàng ngay cả sau khi khởi động lại (reboot) thiết bị.
+  - Có `applicationId` riêng (`dev.opendex.root`) nên có thể cài song song với bản tiêu chuẩn nếu cần.
 
-Nếu bạn muốn mở trực tiếp các ứng dụng Android **ngay bên trong cửa sổ Desktop của OpenDex** (có thanh tiêu đề, kéo thả, chia đôi màn hình, thay đổi kích thước và phóng toàn màn hình `F11`), bạn có thể chọn **1 trong 2 cách** dưới đây (đều **không cần Root**):
+> Khi cài tệp `.apk`, nếu Android yêu cầu, hãy bật **Cho phép cài đặt ứng dụng từ nguồn này / Install unknown apps**.
+
+### 2. Tùy chọn: Đa nhiệm cửa sổ thực thụ trên bản Standard (Không cần Root)
+
+Nếu bạn dùng bản **Standard** (máy chưa Root) và muốn mở trực tiếp các ứng dụng Android **ngay bên trong cửa sổ Desktop của OpenDex** (có thanh tiêu đề, kéo thả, chia đôi màn hình, thay đổi kích thước và phóng toàn màn hình `F11`), bạn có thể chọn **1 trong 2 cách** dưới đây:
 
 #### Cách A: Chạy lệnh ADB trực tiếp từ máy tính (Không cần cài Shizuku)
 
@@ -158,27 +164,31 @@ Phần này dành cho lập trình viên muốn tự biên dịch, gỡ lỗi (d
 
 ### 2. Build bản Debug & Cài đặt qua ADB
 
-Mở dự án bằng **Android Studio** hoặc chạy lệnh sau trong thư mục gốc của dự án:
+OpenDex có 2 product flavors là **`standard`** (`dev.opendex`) và **`root`** (`dev.opendex.root`):
 
 ```bash
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+./gradlew :app:assembleStandardDebug :app:testStandardDebugUnitTest
+# Hoặc build bản Root debug:
+./gradlew :app:assembleRootDebug :app:testRootDebugUnitTest
 ```
 
-Tệp APK Debug sẽ nằm tại `app/build/outputs/apk/debug/app-debug.apk`. Cài đặt nhanh lên thiết bị đang kết nối ADB:
+Cài đặt nhanh lên thiết bị đang kết nối ADB:
 
 ```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/standard/debug/app-standard-debug.apk
 ```
 
 ### 3. Build bản Release (Production APK)
 
 ```bash
-./gradlew :app:assembleRelease :app:testReleaseUnitTest
+./gradlew :app:assembleStandardRelease :app:assembleRootRelease :app:testStandardReleaseUnitTest :app:testRootReleaseUnitTest
 ```
 
-Tệp APK Release sẽ nằm trong `app/build/outputs/apk/release/`. Khi phát hành cho người dùng cuối, hãy ký số (sign) tệp APK Release bằng keystore phát hành của bạn (qua Android Studio *Build → Generate Signed App Bundle / APK* hoặc cấu hình `signingConfigs` trong Gradle).
+Hai tệp APK đầu ra nằm tại:
+- `app/build/outputs/apk/standard/release/app-standard-release.apk`
+- `app/build/outputs/apk/root/release/app-root-release.apk`
 
-> Cả bản **Debug** và bản **Release** đều bao gồm sẵn cơ chế tích hợp Shizuku tùy chọn (opt-in) và hoạt động độc lập hoàn toàn khi thiết bị không cài Shizuku.
+Để ký số bằng keystore phát hành riêng, cấu hình các biến môi trường `OPENDEX_KEYSTORE_FILE`, `OPENDEX_KEYSTORE_PASSWORD`, `OPENDEX_KEY_ALIAS`, `OPENDEX_KEY_PASSWORD` (hoặc khai báo `signing.storeFile` / `signing.storePassword` / `signing.keyAlias` / `signing.keyPassword` trong `local.properties`).
 
 ---
 

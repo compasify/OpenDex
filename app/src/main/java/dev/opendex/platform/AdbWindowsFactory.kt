@@ -15,7 +15,10 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
 import androidx.compose.ui.unit.IntRect
+import dev.opendex.BuildConfig
+import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -50,6 +53,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
         .daemon(false)
         .version(9)
 
+    private val directAdbListener: () -> Unit = { refresh() }
     private val binderReceived = Shizuku.OnBinderReceivedListener { refresh() }
     private val binderDead = Shizuku.OnBinderDeadListener {
         activeBinder = null
@@ -59,29 +63,91 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
     private val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> refresh() }
 
     init {
+        DirectAdbBridge.addListener(directAdbListener)
         Shizuku.addBinderReceivedListenerSticky(binderReceived)
         Shizuku.addBinderDeadListener(binderDead)
         Shizuku.addRequestPermissionResultListener(permissionResult)
+        if (BuildConfig.ALLOW_ROOT_BACKEND && DirectAdbBridge.activeBinder == null && hasSuBinary()) {
+            startRootServerAsync()
+        }
     }
 
     override fun refresh() { status.value = detect() }
 
-    private fun detect(): AdbAccess = try {
-        when {
-            !Shizuku.pingBinder() -> AdbAccess.NotRunning
-            Shizuku.isPreV11() || Shizuku.getVersion() < 13 || Shizuku.getUid() != SHELL_UID -> AdbAccess.WrongBackend
-            Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED -> AdbAccess.NeedsPermission
-            else -> AdbAccess.Granted
-        }
-    } catch (_: RuntimeException) { AdbAccess.NotRunning }
+    private fun currentBinder(): IBinder? =
+        DirectAdbBridge.activeBinder ?: activeBinder?.takeIf { it.isBinderAlive }
 
-    override fun requestAccess(): Boolean = try {
-        if (detect() != AdbAccess.NeedsPermission || Shizuku.shouldShowRequestPermissionRationale()) false
-        else { Shizuku.requestPermission(501); true }
+    private fun detect(): AdbAccess {
+        if (DirectAdbBridge.activeBinder != null) return AdbAccess.Granted
+        val shizukuStatus = try {
+            when {
+                !Shizuku.pingBinder() -> AdbAccess.NotRunning
+                Shizuku.isPreV11() || Shizuku.getVersion() < 13 || !isAuthorizedBackendUid(Shizuku.getUid()) -> AdbAccess.WrongBackend
+                Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED -> AdbAccess.NeedsPermission
+                else -> AdbAccess.Granted
+            }
+        } catch (_: RuntimeException) { AdbAccess.NotRunning }
+        if (shizukuStatus != AdbAccess.NotRunning) return shizukuStatus
+        return if (BuildConfig.ALLOW_ROOT_BACKEND && hasSuBinary()) AdbAccess.NeedsPermission else AdbAccess.NotRunning
+    }
+
+    override fun requestAccess(): Boolean {
+        if (BuildConfig.ALLOW_ROOT_BACKEND && hasSuBinary() && !isShizukuAwaitingPermission()) {
+            return startRootServerAsync()
+        }
+        return try {
+            if (detect() != AdbAccess.NeedsPermission || Shizuku.shouldShowRequestPermissionRationale()) false
+            else { Shizuku.requestPermission(501); true }
+        } catch (_: RuntimeException) { false }
+    }
+
+    private fun isShizukuAwaitingPermission(): Boolean = try {
+        Shizuku.pingBinder() &&
+            !Shizuku.isPreV11() &&
+            Shizuku.getVersion() >= 13 &&
+            isAuthorizedBackendUid(Shizuku.getUid()) &&
+            Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED
     } catch (_: RuntimeException) { false }
 
+    private fun hasSuBinary(): Boolean {
+        val candidates = arrayOf(
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/sbin/su",
+            "/su/bin/su",
+            "/vendor/bin/su",
+            "/data/adb/ksu/bin/su",
+            "/data/adb/ap/bin/su",
+            "/data/adb/magisk/su",
+        )
+        if (candidates.any { File(it).exists() }) return true
+        val path = System.getenv("PATH") ?: return false
+        return path.split(':').any { dir -> dir.isNotBlank() && File(dir, "su").exists() }
+    }
+
+    private fun startRootServerAsync(): Boolean {
+        if (!BuildConfig.ALLOW_ROOT_BACKEND || closed) return false
+        val apkPath = context.applicationInfo.sourceDir
+        val pkg = context.packageName
+        val shellCmd = "nohup sh -c 'CLASSPATH=\"$apkPath\" app_process /system/bin dev.opendex.platform.OpenDexShellServer $pkg' </dev/null >/dev/null 2>&1 &"
+        return runCatching {
+            Thread({
+                val proc = runCatching {
+                    ProcessBuilder("su", "-c", shellCmd).redirectErrorStream(true).start()
+                }.onFailure { Log.w("OpenDex", "Failed to launch root server via su", it) }.getOrNull()
+                    ?: return@Thread
+                runCatching { proc.waitFor(5, TimeUnit.SECONDS) }
+                runCatching { proc.destroy() }
+                refresh()
+            }, "opendex-root-launcher").apply { isDaemon = true }.start()
+            true
+        }.getOrDefault(false)
+    }
+
     private suspend fun ensureBinder(): IBinder? = serviceLock.withLock {
-        if (closed || detect() != AdbAccess.Granted) return@withLock null
+        if (closed) return@withLock null
+        DirectAdbBridge.activeBinder?.let { return@withLock it }
+        if (detect() != AdbAccess.Granted) return@withLock null
         activeBinder?.takeIf { it.isBinderAlive }?.let { return@withLock it }
         unbindLocked(destroy = false)
         val ready = CompletableDeferred<IBinder?>()
@@ -270,7 +336,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
 
     override fun injectMotion(displayId: Int, event: MotionEvent): Boolean {
         if (closed || displayId == Display.INVALID_DISPLAY) return false
-        val binder = activeBinder?.takeIf { it.isBinderAlive } ?: return false
+        val binder = currentBinder() ?: return false
         val copy = MotionEvent.obtain(event)
         val isCoalesceable = copy.actionMasked == MotionEvent.ACTION_HOVER_MOVE ||
             copy.actionMasked == MotionEvent.ACTION_MOVE
@@ -330,7 +396,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
 
     override fun injectKey(displayId: Int, event: KeyEvent): Boolean {
         if (closed || displayId == Display.INVALID_DISPLAY) return false
-        val binder = activeBinder?.takeIf { it.isBinderAlive } ?: return false
+        val binder = currentBinder() ?: return false
         val copy = KeyEvent(event)
         return runCatching {
             inputExecutor.execute {
@@ -357,7 +423,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
 
     override suspend fun releaseAppDisplay(displayId: Int) {
         if (displayId == Display.INVALID_DISPLAY) return
-        if (activeBinder?.isBinderAlive != true) return
+        if (currentBinder() == null) return
         transact(
             code = RELEASE_DISPLAY,
             defaultValue = Unit,
@@ -367,7 +433,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
     }
 
     override suspend fun releaseAllAppDisplays() {
-        if (activeBinder?.isBinderAlive != true) return
+        if (currentBinder() == null) return
         transact(
             code = RELEASE_ALL_DISPLAYS,
             defaultValue = Unit,
@@ -378,7 +444,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
 
     override fun close() {
         closed = true
-        val binder = activeBinder
+        val binder = currentBinder()
         val conn = activeConnection
         activeBinder = null
         activeConnection = null
@@ -399,6 +465,7 @@ private class ShizukuAdbWindows(private val context: Context) : AdbWindows {
             runCatching { Shizuku.unbindUserService(userServiceArgs, conn, true) }
         }
         inputExecutor.shutdownNow()
+        DirectAdbBridge.removeListener(directAdbListener)
         Shizuku.removeBinderReceivedListener(binderReceived)
         Shizuku.removeBinderDeadListener(binderDead)
         Shizuku.removeRequestPermissionResultListener(permissionResult)

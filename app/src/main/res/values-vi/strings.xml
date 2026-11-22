@@ -1,19 +1,23 @@
 <resources>
     <string name="adb_fit_failed">Android không thể phóng to cửa sổ này mà vẫn chừa chỗ cho thanh ứng dụng.</string>
     <string name="adb_window_title">Ứng dụng cửa sổ nổi (ADB)</string>
-    <string name="adb_not_running">Khởi động Shizuku bằng ADB để bật tính năng tùy chọn này. Bạn vẫn có thể mở ứng dụng như bình thường.</string>
+    <string name="root_window_title">Ứng dụng cửa sổ nổi (Root / ADB)</string>
+    <string name="adb_not_running">Khởi động bằng lệnh ADB từ máy tính hoặc qua Shizuku để bật tính năng tùy chọn này. Bạn vẫn có thể mở ứng dụng như bình thường.</string>
+    <string name="root_not_running">Không phát hiện quyền Root (su). Bạn vẫn có thể kích hoạt bằng lệnh ADB từ máy tính, qua Shizuku hoặc mở ứng dụng như bình thường.</string>
     <string name="adb_wrong_backend">Tính năng này cần Shizuku phiên bản 13 trở lên chạy ở chế độ ADB, không phải chế độ root.</string>
     <string name="adb_needs_permission">Shizuku đang chạy. Cho phép OpenDex yêu cầu mở cửa sổ nổi đối với ứng dụng tương thích.</string>
+    <string name="root_needs_permission">Đã phát hiện quyền Root. Cấp quyền siêu người dùng (Superuser) để mở ứng dụng trong cửa sổ desktop mà không cần ADB hay Shizuku.</string>
     <string name="adb_available">Khi mở ứng dụng, OpenDex sẽ mở trong cửa sổ desktop có thanh tiêu đề (tên ứng dụng, thu nhỏ, phóng to, đóng). Nhấn giữ hoặc nhấp phải vào ứng dụng để mở toàn màn hình.</string>
     <string name="adb_grant">Cho phép qua Shizuku</string>
+    <string name="root_grant">Cấp quyền Root</string>
     <string name="adb_permission_unavailable">Không gửi được yêu cầu cấp quyền. Kiểm tra OpenDex trong danh sách ứng dụng được cấp quyền của Shizuku rồi thử lại.</string>
-    <string name="adb_launch_failed">Không mở được ở chế độ cửa sổ nổi. Hãy kiểm tra Shizuku hoặc mở ứng dụng theo cách thông thường.</string>
+    <string name="adb_launch_failed">Không mở được ở chế độ cửa sổ nổi. Hãy kiểm tra ADB/Shizuku hoặc mở ứng dụng theo cách thông thường.</string>
     <string name="open_app_in_window">Mở trong cửa sổ</string>
     <string name="maximize_window">Phóng to %1$s</string>
     <string name="restore_window">Khôi phục kích thước %1$s</string>
-    <string name="hosted_window_failed">Không thể mở %1$s trong cửa sổ. Hãy kiểm tra Shizuku hoặc mở toàn màn hình.</string>
+    <string name="hosted_window_failed">Không thể mở %1$s trong cửa sổ. Hãy kiểm tra ADB/Shizuku hoặc mở toàn màn hình.</string>
     <string name="hosted_window_loading">Đang mở %1$s…</string>
-    <string name="adb_disconnected_windows">Shizuku đã ngắt kết nối. Các cửa sổ ứng dụng đang mở đã đóng.</string>
+    <string name="adb_disconnected_windows">ADB/Shizuku đã ngắt kết nối. Các cửa sổ ứng dụng đang mở đã đóng.</string>
     <string name="running_app">%1$s (đang mở)</string>
     <string name="minimized_app">%1$s (đã thu nhỏ)</string>
     <string name="external_display">Màn hình ngoài</string>

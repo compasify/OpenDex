@@ -1,19 +1,23 @@
 <resources>
     <string name="adb_fit_failed">Android did not resize this window to fit above the dock.</string>
     <string name="adb_window_title">Floating apps (ADB)</string>
-    <string name="adb_not_running">Start Shizuku using ADB to enable this optional action. Standard app launches still work.</string>
+    <string name="root_window_title">Floating apps (Root / ADB)</string>
+    <string name="adb_not_running">Start via ADB from a computer or Shizuku to enable this optional feature. Standard app launches still work.</string>
+    <string name="root_not_running">Root (su) was not detected. You can still start via ADB from a computer or Shizuku, or use standard app launches.</string>
     <string name="adb_wrong_backend">This feature requires Shizuku 13 or later started in ADB mode, not root mode.</string>
     <string name="adb_needs_permission">Shizuku is running. Authorize OpenDex to request floating windows for compatible apps.</string>
+    <string name="root_needs_permission">Root access detected. Grant superuser permission to open apps in desktop windows without ADB or Shizuku.</string>
     <string name="adb_available">Opening an app opens it in a desktop window with title bar controls (minimize, maximize, close). Long-press or right-click an app to open it fullscreen instead.</string>
     <string name="adb_grant">Allow via Shizuku</string>
+    <string name="root_grant">Allow via Root</string>
     <string name="adb_permission_unavailable">Could not request permission. Check OpenDex in Shizuku’s Authorized applications and try again.</string>
-    <string name="adb_launch_failed">The floating launch was not accepted. Check Shizuku or open the app normally.</string>
+    <string name="adb_launch_failed">The floating launch was not accepted. Check ADB/Shizuku or open the app normally.</string>
     <string name="open_app_in_window">Open in window</string>
     <string name="maximize_window">Maximize %1$s</string>
     <string name="restore_window">Restore %1$s</string>
-    <string name="hosted_window_failed">Could not open %1$s in a window. Check Shizuku or open fullscreen.</string>
+    <string name="hosted_window_failed">Could not open %1$s in a window. Check ADB/Shizuku or open fullscreen.</string>
     <string name="hosted_window_loading">Starting %1$s…</string>
-    <string name="adb_disconnected_windows">Shizuku disconnected. Hosted app windows were closed.</string>
+    <string name="adb_disconnected_windows">ADB/Shizuku disconnected. Hosted app windows were closed.</string>
     <string name="running_app">%1$s (open)</string>
     <string name="minimized_app">%1$s (minimized)</string>
     <string name="app_name" translatable="false">OpenDex</string>

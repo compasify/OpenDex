@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.opendex.BuildConfig
 import dev.opendex.R
 import dev.opendex.data.DEFAULT_EXTERNAL_OVERSCAN_PERCENT
 import dev.opendex.data.DisplayScale
@@ -645,7 +646,7 @@ internal fun SettingsPanel(
         }
 
         if (adbAccess != AdbAccess.NotIncluded) {
-            SettingsCard(title = R.string.adb_window_title) {
+            SettingsCard(title = if (BuildConfig.ALLOW_ROOT_BACKEND) R.string.root_window_title else R.string.adb_window_title) {
                 AdbAccessPanel(adbAccess, onAdbPermission)
             }
         }
@@ -1193,15 +1194,20 @@ private fun SettingsSwitchRow(
 
 @Composable
 private fun AdbAccessPanel(access: AdbAccess, onPermission: () -> Unit) {
+    val rootMode = BuildConfig.ALLOW_ROOT_BACKEND
     val message = when (access) {
         AdbAccess.NotIncluded -> return
-        AdbAccess.NotRunning -> R.string.adb_not_running
+        AdbAccess.NotRunning -> if (rootMode) R.string.root_not_running else R.string.adb_not_running
         AdbAccess.WrongBackend -> R.string.adb_wrong_backend
-        AdbAccess.NeedsPermission -> R.string.adb_needs_permission
+        AdbAccess.NeedsPermission -> if (rootMode) R.string.root_needs_permission else R.string.adb_needs_permission
         AdbAccess.Granted -> R.string.adb_available
     }
     Text(stringResource(message), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (access == AdbAccess.NeedsPermission) OutlinedButton(onClick = onPermission) { Text(stringResource(R.string.adb_grant)) }
+    if (access == AdbAccess.NeedsPermission) {
+        OutlinedButton(onClick = onPermission) {
+            Text(stringResource(if (rootMode) R.string.root_grant else R.string.adb_grant))
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
