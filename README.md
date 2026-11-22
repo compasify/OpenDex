@@ -207,6 +207,7 @@ Trên Android 13+, bạn có thể chọn riêng ngôn ngữ Tiếng Anh hoặc 
 ## 🔗 Dự án liên quan
 
 - **[AirDeck](https://github.com/compasify/AirDeck)** — Ứng dụng biến điện thoại hoặc máy tính bảng Android thành **bàn phím không dây, touchpad đa điểm, remote Smart TV, chuột bay (Air Mouse), bàn phím số và bút trình chiếu qua Bluetooth HID** — không cần cài app phụ hay server trên thiết bị đích. Rất lý tưởng để điều khiển Smart TV, PC hoặc màn hình ngoài đang chạy **OpenDex**.
+- **[Media Float Button](https://github.com/compasify/media-float-button)** — Cụm nút nổi tua lùi, tua tiến theo giây và phát/tạm dừng cho video web trên máy tính bảng và điện thoại Android, hỗ trợ tùy chỉnh bước tua, độ mờ, kích thước và widget bật/tắt nhanh.
 
 ---
 
